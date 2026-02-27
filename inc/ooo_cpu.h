@@ -7,6 +7,7 @@
 #include "offchip_pred_base.h"
 #include "ddrp_monitor.h"
 #include "offchip_tracer.h"
+#include "ptw.h"
 #include <bitset>
 #include <unordered_map>
 #include <vector>
@@ -121,6 +122,9 @@ public:
 
     // DDRP MONITOR
     DDRPMonitor *ddrp_monitor;
+
+    // Page Table Walker (PTWclass) module
+    PTWclass *page_table_walker;
 
     // trace cache for previously decoded instructions
 
@@ -320,6 +324,7 @@ public:
     int  execute_load(uint32_t rob_index, uint32_t sq_index, uint32_t data_index);
     void check_dependency(int prior, int current);
     void operate_cache();
+    void operate_ptw();
     void update_rob();
     void retire_rob();
 

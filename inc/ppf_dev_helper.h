@@ -1,6 +1,7 @@
 #ifndef PPF_DEV_HELPER_H
 #define PPF_DEV_HELPER_H
 
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <iomanip>      // std::setw

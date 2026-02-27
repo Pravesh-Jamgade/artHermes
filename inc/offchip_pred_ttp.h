@@ -18,6 +18,8 @@
 #ifndef OFFCHIP_PRED_TTP_H
 #define OFFCHIP_PRED_TTP_H
 
+#include <cstdint>
+
 #include <unordered_map>
 #include "offchip_pred_base.h"
 

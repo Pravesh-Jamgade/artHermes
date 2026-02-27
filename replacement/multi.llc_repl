@@ -45,12 +45,22 @@ void CACHE::llc_initialize_replacement()
         llc_repl = (LRURepl*) new LRURepl(knob::llc_replacement_type, this);
         llc_repl->initialize_replacement();
     }
+    else
+    {
+        // no valid replacement specified; fall back to LRU to avoid null pointer
+        cout << "Warning: unknown or empty llc_replacement_type ('" << knob::llc_replacement_type << "'), defaulting to LRU" << endl;
+        llc_repl = (LRURepl*) new LRURepl("lru", this);
+        llc_repl->initialize_replacement();
+    }
 }
 
 // print config
 void CACHE::llc_replacement_print_config()
 {
-    llc_repl->print_config();
+    if(llc_repl)
+        llc_repl->print_config();
+    else
+        cout << "LLC replacement not initialized yet" << endl;
 }
 
 // called on every cache hit and cache fill

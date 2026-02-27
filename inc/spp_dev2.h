@@ -1,6 +1,8 @@
 #ifndef SPP_DEV2_H
 #define SPP_DEV2_H
 
+#include <cstdint>
+
 #include <string>
 #include <vector>
 #include <unordered_map>

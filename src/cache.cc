@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <algorithm>
 #include "cache.h"
 #include "set.h"
@@ -886,9 +887,12 @@ void CACHE::handle_read()
                 //else if (cache_type == IS_L1D) {
                 else if ((cache_type == IS_L1D) && (rq_entry.type != PREFETCH)) 
                 {
-                    if (PROCESSED.occupancy < PROCESSED.SIZE)
-                    {
-                        PROCESSED.add_queue(&rq_entry, current_core_cycle[read_cpu]);
+                    // do not forward translation packets back to the core
+                    if (!rq_entry.tlb_access) {
+                        if (PROCESSED.occupancy < PROCESSED.SIZE)
+                        {
+                            PROCESSED.add_queue(&rq_entry, current_core_cycle[read_cpu]);
+                        }
                     }
                 }
 
@@ -1072,13 +1076,27 @@ void CACHE::handle_read()
                         {
                             if (cache_type == IS_STLB)
                             {
-                                // TODO: need to differentiate page table walk and actual swap                    
-                                // emulate page table walk
-                                uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
-                                rq_entry.data = pa >> LOG2_PAGE_SIZE; 
-                                rq_entry.event_cycle = current_core_cycle[read_cpu];
-                                rq_entry.hit_where = hit_where_t::PTW; // STLB miss => PTW
-                                return_data(&rq_entry);
+                                // Pravesh: Comment out PTW page walk related code
+                                // Route STLB miss to PTW (Page Table Walker) module
+                                // The PTW will perform a hierarchical page walk through 4 levels of PwC
+                                /*
+                                if (ooo_cpu[read_cpu].page_table_walker != NULL)
+                                {
+                                    // Initiate page walk in PTW
+                                    ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
+                                    // PTW will asynchronously handle the walk and call return_data
+                                    // when translation is complete
+                                }
+                                else
+                                */
+                                {
+                                    // Fallback: Direct va_to_pa translation if PTW not available
+                                    uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
+                                    rq_entry.data = pa >> LOG2_PAGE_SIZE; 
+                                    rq_entry.event_cycle = current_core_cycle[read_cpu];
+                                    rq_entry.hit_where = hit_where_t::PTW; // STLB miss => PTW
+                                    return_data(&rq_entry);
+                                }
                             }
                         }
                     }
@@ -2184,6 +2202,16 @@ void CACHE::return_data(PACKET *packet)
 
     update_fill_cycle();
 
+    // Pravesh: Comment out PTW memory response handling
+    // if this packet originated from the PTW module, notify it of the response
+    /*
+    if (packet->from_ptw && packet->cpu < NUM_CPUS) {
+        if (ooo_cpu[packet->cpu].page_table_walker != NULL) {
+            ooo_cpu[packet->cpu].page_table_walker->handle_memory_response(packet);
+        }
+    }
+    */
+
     DP (if (warmup_complete[packet->cpu]) {
     cout << "[" << NAME << "_MSHR] " <<  __func__ << " instr_id: " << MSHR.entry[mshr_index].instr_id;
     cout << " address: " << hex << MSHR.entry[mshr_index].address << " full_addr: " << MSHR.entry[mshr_index].full_addr;
@@ -2491,7 +2519,8 @@ void CACHE::send_signal_to_core(uint32_t cpu, PACKET packet)
     {
         cout << "rob_index in LQ entry does not match with the rob_index from RQ entry"
             << " rob_index from LQ: " << ooo_cpu[cpu].LQ.entry[lq_index].rob_index
-            << " rob_index from RQ: " << rob_index << endl;
+            << " rob_index from RQ: " << rob_index
+            << "packet type: " << packet.type << endl;
         assert(0);
     }
 #endif

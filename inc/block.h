@@ -190,6 +190,11 @@ class PACKET {
              cycle_enqueued,
              enque_cycle[NUM_MODULE_TYPES][NUM_QUEUE_TYPES],
              deque_cycle[NUM_MODULE_TYPES][NUM_QUEUE_TYPES];
+    
+    // PTW-specific tracking
+    uint8_t from_ptw;              // set when packet originated from PTW walk
+    uint32_t ptw_level;            // which PwC level this request corresponds to
+    void *ptw_walk_ptr;            // pointer back to OutstandingWalk
 
     uint8_t went_offchip_pred; // populated from corresponding LQ entry
 
@@ -260,6 +265,11 @@ class PACKET {
             }
         }
         went_offchip_pred = 0;
+
+        // PTW defaults
+        from_ptw = 0;
+        ptw_level = 0;
+        ptw_walk_ptr = NULL;
     };
     std::string to_string();
 };

@@ -6,6 +6,8 @@
 #ifndef CHAMPSIM_COMMONS_H
 #define CHAMPSIM_COMMONS_H
 
+#include <cstdint>
+
 /*********************
  * Basic definitions
  *********************/
@@ -39,7 +41,8 @@
 #define RFO       1
 #define PREFETCH  2
 #define WRITEBACK 3
-#define NUM_TYPES 4
+#define TRANSLATION 4
+#define NUM_TYPES 5
 
 // ROB PARTITION TYPES
 #define FRONTAL             0

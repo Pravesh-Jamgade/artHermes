@@ -1,7 +1,11 @@
 #ifndef SPP_DEV2_HELPER_H
 #define SPP_DEV2_HELPER_H
 
+#include <cstdint>
+
 //namespace spp{
+
+#undef PT_SET // ensure no prior definition
 
 // SPP functional knobs
 #define LOOKAHEAD_ON

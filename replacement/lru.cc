@@ -32,6 +32,8 @@ void LRURepl::update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way,
         TYPE_NAME = "PF";
     else if (type == WRITEBACK)
         TYPE_NAME = "WB";
+    else if (type == TRANSLATION)
+        TYPE_NAME = "TRANSLATION";
     else
         assert(0);
 

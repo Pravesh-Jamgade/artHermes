@@ -1247,6 +1247,9 @@ int main(int argc, char** argv)
         ooo_cpu[i].STLB.upper_level_icache[i] = &ooo_cpu[i].ITLB;
         ooo_cpu[i].STLB.upper_level_dcache[i] = &ooo_cpu[i].DTLB;
 
+        // initialize core subsystems (PTW creation happens here)
+        ooo_cpu[i].initialize_core();
+
         // PRIVATE CACHE
         ooo_cpu[i].L1I.cpu = i;
         ooo_cpu[i].L1I.cache_type = IS_L1I;
@@ -1567,6 +1570,12 @@ int main(int argc, char** argv)
         if(knob::l2c_dump_access_trace)
         {
             ooo_cpu[cpu].L2C.tracer.fini_tracing();
+        }
+        // print and cleanup page table walker stats if present
+        if(ooo_cpu[cpu].page_table_walker) {
+            ooo_cpu[cpu].page_table_walker->print_stats();
+            delete ooo_cpu[cpu].page_table_walker;
+            ooo_cpu[cpu].page_table_walker = nullptr;
         }
     }
     if(knob::llc_dump_access_trace)

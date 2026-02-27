@@ -33,7 +33,14 @@ namespace knob
 
 void O3_CPU::initialize_core()
 {
-
+    // Initialize PTW module
+    if (page_table_walker == NULL) {
+        page_table_walker = new PTWclass(cpu);
+        // connect caches for translation results
+        page_table_walker->stlb_cache = &STLB;
+        page_table_walker->dtlb_cache = &DTLB;
+        page_table_walker->itlb_cache = &ITLB;
+    }
 }
 
 void print_core_config()
@@ -1234,6 +1241,8 @@ void O3_CPU::execute_memory_instruction()
 {
     operate_lsq();
     operate_cache();
+    // Pravesh: Comment out PTW operate call
+    // operate_ptw();
 }
 
 void O3_CPU::do_memory_scheduling(uint32_t rob_index)
@@ -1991,6 +2000,13 @@ void O3_CPU::operate_cache()
 
     // also handle per-cycle prefetcher operation
     l1i_prefetcher_cycle_operate();
+}
+
+void O3_CPU::operate_ptw()
+{
+    if (page_table_walker != NULL) {
+        page_table_walker->operate();
+    }
 }
 
 void O3_CPU::update_rob()

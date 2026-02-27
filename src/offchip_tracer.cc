@@ -1,5 +1,6 @@
 #include <iostream>
 #include <assert.h>
+#include <cstdint>
 #include "offchip_tracer.h"
 using namespace std;
 
