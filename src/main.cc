@@ -786,7 +786,7 @@ void print_deadlock(uint32_t i)
     // print LQ entry
     cout << endl << "Load Queue Entry" << endl;
     for (uint32_t j=0; j<LQ_SIZE; j++) {
-        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[i].fetched << endl;
+        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << " vaddr: " << hex << ooo_cpu[i].LQ.entry[j].virtual_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[i].fetched << endl;
     }
 
     // print SQ entry
@@ -795,14 +795,29 @@ void print_deadlock(uint32_t i)
         cout << "[SQ] entry: " << j << " instr_id: " << ooo_cpu[i].SQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].SQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].SQ.entry[j].translated << " fetched: " << +ooo_cpu[i].SQ.entry[i].fetched << endl;
     }
 
+    // RQ
+    PACKET_QUEUE_BASE *pri_queue;
     // print L1D MSHR entry
     PACKET_QUEUE *queue;
+    
     queue = &ooo_cpu[i].L1D.MSHR;
     cout << endl << queue->NAME << " Entry" << endl;
     for (uint32_t j=0; j<queue->SIZE; j++) {
         cout << "[" << queue->NAME << "] entry: " << j << " instr_id: " << queue->entry[j].instr_id << " rob_index: " << queue->entry[j].rob_index;
         cout << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec << " type: " << +queue->entry[j].type;
         cout << " fill_level: " << queue->entry[j].fill_level << " lq_index: " << queue->entry[j].lq_index << " sq_index: " << queue->entry[j].sq_index << endl; 
+    }
+
+    // Read Queue L1D
+    pri_queue = ooo_cpu[i].L1D.RQ;
+    cout << endl << pri_queue->NAME << " Entry" << endl;
+    for (uint32_t j=0; j<pri_queue->SIZE; j++) {
+        PACKET &pkt = pri_queue->get_entry(j);
+        if (pkt.cpu == NUM_CPUS) continue;
+        cout << "[" << pri_queue->NAME << "] entry: " << j << " instr_id: " << pkt.instr_id << " rob_index: " << pkt.rob_index;
+        cout << " address: " << hex << pkt.address << " full_addr: " << pkt.full_addr << dec << " type: " << +pkt.type;
+        cout << " fill_level: " << pkt.fill_level << " lq_index: " << pkt.lq_index << " sq_index: " << pkt.sq_index;
+        cout << " translated: " << +pkt.translated << " fetched: " << +pkt.fetched << " returned: " << +pkt.returned << " event_cycle: " << pkt.event_cycle << endl;
     }
 
     // print L2C MSHR entry
@@ -814,6 +829,18 @@ void print_deadlock(uint32_t i)
         cout << " fill_level: " << queue->entry[j].fill_level << " lq_index: " << queue->entry[j].lq_index << " sq_index: " << queue->entry[j].sq_index << endl; 
     }
 
+    // Read Queue L2C
+    pri_queue = ooo_cpu[i].L2C.RQ;
+    cout << endl << pri_queue->NAME << " Entry" << endl;
+    for (uint32_t j=0; j<pri_queue->SIZE; j++) {
+        PACKET &pkt = pri_queue->get_entry(j);
+        if (pkt.cpu == NUM_CPUS) continue;
+        cout << "[" << pri_queue->NAME << "] entry: " << j << " instr_id: " << pkt.instr_id << " rob_index: " << pkt.rob_index;
+        cout << " address: " << hex << pkt.address << " full_addr: " << pkt.full_addr << dec << " type: " << +pkt.type;
+        cout << " fill_level: " << pkt.fill_level << " lq_index: " << pkt.lq_index << " sq_index: " << pkt.sq_index;
+        cout << " translated: " << +pkt.translated << " fetched: " << +pkt.fetched << " returned: " << +pkt.returned << " event_cycle: " << pkt.event_cycle << endl;
+    }
+
     // print LLC MSHR entry
     queue = &uncore.LLC.MSHR;
     cout << endl << queue->NAME << " Entry" << endl;
@@ -822,9 +849,32 @@ void print_deadlock(uint32_t i)
         cout << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec << " type: " << +queue->entry[j].type;
         cout << " fill_level: " << queue->entry[j].fill_level << " lq_index: " << queue->entry[j].lq_index << " sq_index: " << queue->entry[j].sq_index << endl; 
     }
+
+    // Read Queue LLC
+    pri_queue = uncore.LLC.RQ;
+    cout << endl << pri_queue->NAME << " Entry" << endl;
+    for (uint32_t j=0; j<pri_queue->SIZE; j++) {
+        PACKET &pkt = pri_queue->get_entry(j);
+        if (pkt.cpu == NUM_CPUS) continue;
+        cout << "[" << pri_queue->NAME << "] entry: " << j << " instr_id: " << pkt.instr_id << " rob_index: " << pkt.rob_index;
+        cout << " address: " << hex << pkt.address << " full_addr: " << pkt.full_addr << dec << " type: " << +pkt.type;
+        cout << " fill_level: " << pkt.fill_level << " lq_index: " << pkt.lq_index << " sq_index: " << pkt.sq_index;
+        cout << " translated: " << +pkt.translated << " fetched: " << +pkt.fetched << " returned: " << +pkt.returned << " event_cycle: " << pkt.event_cycle << endl;
+    }
+
+    deque<PTWclass::OutstandingWalk> outstanding_walks = ooo_cpu[i].page_table_walker->outstanding_walks;
+    for(auto entry: outstanding_walks)
+    {
+        cout << "Walks instr_id: " << entry.instr_id << " vaddr: " << hex << entry.vaddr << dec << " walk_level: " << +entry.current_level  << endl;
+    }
+
+    for(int i=0; i< PTW_MSHR_SIZE; ++i)
+    {
+        cout << "PTW MSHR: " << i << ", valid, " << ooo_cpu[i].page_table_walker->mshr[i].valid << std::hex << ", vaddr, " << ooo_cpu[i].page_table_walker->mshr[i].vaddr << ", paddr, " << ooo_cpu[i].page_table_walker->mshr[i].current_pa << ", " << std::dec << ooo_cpu[i].page_table_walker->mshr[i].current_level << endl;
+    }
     
     assert(0);
-}
+} 
 
 void signal_handler(int signal) 
 {
@@ -910,11 +960,17 @@ uint64_t va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_
                 }
             }
 #ifdef SANITY_CHECK
-            if (found_NRU == 0)
-                assert(0);
+            if (found_NRU == 0) {
+                cerr << "[PAGE_TABLE_ERROR] No NRU page found for swap: page_table_size=" << page_table.size();
+                cerr << " recent_page_size=" << recent_page.size() << " cpu=" << cpu << endl;
+                assert(0 && "Failed to find not-recently-used page for eviction");
+            }
 
-            if (pr == page_table.end())
-                assert(0);
+            if (pr == page_table.end()) {
+                cerr << "[PAGE_TABLE_ERROR] page_table iterator at end after NRU search: found_NRU=" << +found_NRU;
+                cerr << " NRU_vpage=0x" << hex << NRU_vpage << dec << " cpu=" << cpu << endl;
+                assert(0 && "Page table iterator unexpectedly reached end");
+            }
 #endif
             DP ( if (warmup_complete[cpu]) {
             cout << "[SWAP] update page table NRU_vpage: " << hex << pr->first << " new_vpage: " << vpage << " ppage: " << pr->second << dec << endl; });
@@ -1123,8 +1179,8 @@ int main(int argc, char** argv)
                 FILE *testfile = popen(testfile_command, "r");
                 if (pclose(testfile))
                 {
-                    std::cerr << "TRACE FILE NOT FOUND" << std::endl;
-                    assert(0);
+                    std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                    assert(0 && "Remote trace file does not exist or is inaccessible");
                 }
                 fmtstr = "wget -qO- %2$s | %1$s -dc";
             }
@@ -1133,8 +1189,8 @@ int main(int argc, char** argv)
                 std::ifstream testfile(argv[i]);
                 if (!testfile.good())
                 {
-                    std::cerr << "TRACE FILE NOT FOUND" << std::endl;
-                    assert(0);
+                    std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                    assert(0 && "Local trace file does not exist or is not readable");
                 }
                 fmtstr = "%1$s -dc %2$s";
             }
@@ -1171,14 +1227,16 @@ int main(int argc, char** argv)
 
             ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
             if (ooo_cpu[count_traces].trace_file == NULL) {
-                printf("\n*** Trace file not found: %s ***\n\n", argv[i]);
-                assert(0);
+                printf("\n*** Trace file not found: %s ***\n", argv[i]);
+                printf("Command: %s\n", ooo_cpu[count_traces].gunzip_command);
+                assert(0 && "Failed to open trace file with popen");
             }
 
             count_traces++;
             if (count_traces > NUM_CPUS) {
-                printf("\n*** Too many traces for the configured number of cores ***\n\n");
-                assert(0);
+                printf("\n*** Too many traces for the configured number of cores ***\n");
+                printf("count_traces=%d NUM_CPUS=%d\n\n", count_traces, NUM_CPUS);
+                assert(0 && "Number of traces exceeds NUM_CPUS");
             }
         }
         else if(strcmp(argv[i],"-traces") == 0) {
@@ -1305,6 +1363,9 @@ int main(int argc, char** argv)
         // DDRP BUFFER
         if(knob::dram_cntlr_enable_ddrp_buffer)
             uncore.DRAM.init_ddrp_buffer();
+
+        // BUDDY ALLOCATOR (page fault / DRAM residency tracking)
+        buddy_allocator.init(DRAM_PAGES);
 
         // link DRAM controller from core for DDRP
         ooo_cpu[i].dram_controller = &uncore.DRAM;

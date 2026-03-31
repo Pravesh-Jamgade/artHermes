@@ -70,16 +70,14 @@ extern "C" bool handle_stlb_miss(void* cpu_ptr, PACKET* packet) {
 
     // Pravesh: Comment out PTW initiate_page_walk code
     // Check if PTW queue is available
-    /*
     if (!ptw->is_walk_queue_available()) {
         return false; // PTW queue is full, stall the request
     }
     
     // Initiate page walk in PTW using full virtual address (includes offset)
     ptw->initiate_page_walk(packet, packet->full_addr);
-    */
     
-    return false; // Pravesh: PTW disabled - return false to fall back to default handling
+    return true; // Pravesh: PTW disabled - return false to fall back to default handling
 }
 
 /**

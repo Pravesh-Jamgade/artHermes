@@ -4,6 +4,31 @@
 #include "set.h"
 #include "ooo_cpu.h"
 #include "uncore.h"
+#include "logging.h"
+#include "buddy_allocator.h"
+
+// =====================================================================
+// CACHE.CC - Cache Hierarchy Implementation
+// =====================================================================
+//
+// This module implements the multi-level cache hierarchy for the processor,
+// including TLBs (ITLB, DTLB, STLB) and data/instruction caches (L1I, L1D, L2C, LLC).
+//
+// Key Sections:
+//   - Configuration & Initialization (print_cache_config, create_rq)
+//   - Fill Operations (handle_fill)
+//   - Read Operations (handle_read, check_hit)
+//   - Write Operations (handle_writeback, add_wq)
+//   - Prefetch Operations (handle_prefetch, prefetch_line)
+//   - MSHR Management (add_mshr, check_mshr)
+//   - Cache Management (fill_cache, invalidate_entry)
+//   - Response Handling (return_data) - includes Pravesh page table routing
+//   - Main Cycle (operate)
+//
+// Pravesh PTW (Page Table Walker) Integration:
+//   - TRANSLATION packets are routed through PTW for caching in PWC
+//   - See lines marked with "Pravesh:" for page table handling code
+// =====================================================================
 
 namespace knob
 {
@@ -26,6 +51,7 @@ namespace knob
     extern float    l2c_pseudo_perfect_prob;
     extern bool     l2c_pseudo_perfect_enable_frontal;
     extern bool     l2c_pseudo_perfect_enable_dorsal;
+    extern bool     enable_ptw;
     extern bool     enable_ddrp;
     extern bool     offchip_pred_mark_merged_load;
     extern bool     enable_itlb_priority_rq;
@@ -124,6 +150,10 @@ void print_cache_config()
         << endl;
 }
 
+// =====================================================================
+// CONFIGURATION & INITIALIZATION
+// =====================================================================
+
 void CACHE::create_rq()
 {
     // create RQ appropriately
@@ -161,6 +191,10 @@ void CACHE::create_rq()
     }
 }
 
+// =====================================================================
+// CACHE FILL OPERATIONS - Complete cache fill from next level
+// =====================================================================
+
 void CACHE::handle_fill()
 {
     // handle fill
@@ -176,7 +210,8 @@ void CACHE::handle_fill()
 #ifdef SANITY_CHECK
         if (MSHR.next_fill_index >= MSHR.SIZE)
         {
-            assert(0);
+            cerr << "[" << NAME << "] MSHR index out of bounds: " << MSHR.next_fill_index << " >= " << MSHR.SIZE << endl;
+            assert(0 && "MSHR index sanity check failed");
         }
 #endif
 
@@ -293,8 +328,10 @@ void CACHE::handle_fill()
             else 
             {
                 // sanity check
-                if (cache_type != IS_STLB)
-                    assert(0);
+                if (cache_type != IS_STLB) {
+                    cerr << "[" << NAME << "] Cache has no lower level but is not STLB. Packet addr: 0x" << hex << block[set][way].address << dec << endl;
+                    assert(0 && "Non-STLB cache missing lower level");
+                }
             }
 #endif
         }
@@ -427,9 +464,20 @@ void CACHE::handle_fill()
                 }
             }
             //else if (cache_type == IS_L1D) {
+            // Pravesh: Page table translation handling - allow TRANSLATION packets from L1D
             else if ((cache_type == IS_L1D) && (MSHR.entry[mshr_index].type != PREFETCH)) 
             {
-                if (PROCESSED.occupancy < PROCESSED.SIZE)
+                // Allow TRANSLATION packets from L1D to proceed through PWC -> STLB -> DTLB
+                // Mark TRANSLATION packets as coming from PTW so they route back to it
+                // Pravesh: Mark TRANSLATION packets to route through PTW for proper caching
+                if (MSHR.entry[mshr_index].type == TRANSLATION)
+                {
+                    // if this packet originated from the PTW module, notify it of the response
+                    if (ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker != NULL) {
+                        ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker->handle_memory_response(&MSHR.entry[mshr_index]);
+                    }
+                }
+                else if (PROCESSED.occupancy < PROCESSED.SIZE)
                 {
                     PROCESSED.add_queue(&MSHR.entry[mshr_index], current_core_cycle[fill_cpu]);
                 }
@@ -447,6 +495,12 @@ void CACHE::handle_fill()
                 total_miss_latency += current_miss_latency;
 	        }
 	  
+            // Logging: MSHR remove
+            if (MSHR.entry[mshr_index].type == TRANSLATION) {
+                LOG_DEBUG("%s MSHR_REM T addr:0x%lx lvl:%d", NAME.c_str(), MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].fill_level);
+            } else {
+                LOG_DEBUG("%s MSHR_REM addr:0x%lx typ:%d", NAME.c_str(), MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].type);
+            }
             MSHR.remove_queue(&MSHR.entry[mshr_index]);
             MSHR.num_returned--;
 
@@ -454,6 +508,10 @@ void CACHE::handle_fill()
         }
     }
 }
+
+// =====================================================================
+// WRITE-BACK OPERATIONS - Flush modified cache lines to next level
+// =====================================================================
 
 void CACHE::handle_writeback()
 {
@@ -655,8 +713,10 @@ void CACHE::handle_writeback()
                     }
                     else // WE SHOULD NOT REACH HERE
                     {
-                        cerr << "[" << NAME << "] MSHR errors" << endl;
-                        assert(0);
+                        cerr << "[" << NAME << "] WQ MSHR errors: addr=0x" << hex << WQ.entry[index].address
+                             << " full_addr=0x" << WQ.entry[index].full_addr << dec
+                             << " instr_id=" << WQ.entry[index].instr_id << " type=" << +WQ.entry[index].type << endl;
+                        assert(0 && "WQ MSHR processing error");
                     }
                 }
 
@@ -687,8 +747,8 @@ void CACHE::handle_writeback()
 #ifdef LLC_BYPASS
                 if ((cache_type == IS_LLC) && (way == LLC_WAY)) 
                 {
-                    cerr << "LLC bypassing for writebacks is not allowed!" << endl;
-                    assert(0);
+                    cerr << "[" << NAME << "_ERROR] LLC bypassing for writebacks not allowed: way=" << way;
+                    assert(0 && "LLC bypass attempted for writeback");
                 }
 #endif
 
@@ -733,8 +793,10 @@ void CACHE::handle_writeback()
                     else 
                     {
                         // sanity check
-                        if (cache_type != IS_STLB)
-                            assert(0);
+                        if (cache_type != IS_STLB) {
+                            cerr << "[" << NAME << "_ERROR] Invalid cache type for this operation: cache_type=" << cache_type;
+                            assert(0 && "Expected STLB cache type");
+                        }
                     }
 #endif
                 }
@@ -831,6 +893,10 @@ void CACHE::handle_writeback()
     }
 }
 
+// =====================================================================
+// READ OPERATIONS - Process read requests and cache hits/misses
+// =====================================================================
+
 void CACHE::handle_read()
 {
     // handle read
@@ -849,13 +915,63 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
+            if (rq_entry.type == TRANSLATION)
+            {
+                l.log(NAME, "handle_read", "proc",
+                    "idx", index,
+                    "instr_id", rq_entry.instr_id,
+                    "addr", hex2str(rq_entry.address),
+                    "type", rq_entry.type,
+                    "ev", rq_entry.event_cycle,
+                    "cur", current_core_cycle[read_cpu], '\n');
+            }
+
             // access cache
             uint32_t set = get_set(rq_entry.address);
             int way = check_hit(&rq_entry);
+
+            // Pravesh: if hit, check 8-byte entry there or not
+            if (knob::enable_ptw && rq_entry.type == TRANSLATION && rq_entry.from_ptw && way >= 0)
+            {
+                uint64_t shadow_val;
+                bool is_pf = false;
+                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, (uint8_t)rq_entry.ptw_level, shadow_val, is_pf);
+
+                if (is_pf) {
+                    // Entry was initialised but never officially walked by PTW yet.
+                    // Force a miss so the request goes to memory and gets the
+                    // correct PTE value rather than stale cached data.
+                    l.log(NAME, "handle_read", "PTW_FORCED_MISS_PAGE_FAULT",
+                        "addr", hex2str(rq_entry.full_addr), "lvl", rq_entry.ptw_level, '\n');
+                    way = -1; // override: treat as miss
+                } else {
+                    // PTW has officially walked this entry — use shadow value.
+                    if (tracked) {
+                        assert(shadow_val != 0
+                            && "shadow page-table entry is zero on L1D cache hit "
+                               "(pte_paddr hit but shadow entry was never initialised or was zeroed)");
+                        rq_entry.data = shadow_val;
+                    }
+                    rq_entry.hit_where = hit_where_t::L1D;
+                    if (ooo_cpu[read_cpu].page_table_walker != NULL)
+                        ooo_cpu[read_cpu].page_table_walker->handle_memory_response(&rq_entry);
+                }
+            }
             
             if (way >= 0) // read hit
             {
                 rq_entry.hit_where = assign_hit_where(cache_type, 0); // read hit
+                
+                // Logging: cache hit
+                if (rq_entry.type == TRANSLATION) {
+                    LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
+                    l.log(NAME, "handle_read", "HIT",
+                        "addr", hex2str(rq_entry.address),
+                        "set", set,
+                        "way", way, '\n');
+                } else {
+                    LOG_DEBUG("%s HIT addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
+                }
 
                 if (cache_type == IS_ITLB) 
                 {
@@ -885,10 +1001,10 @@ void CACHE::handle_read()
                     }
                 }
                 //else if (cache_type == IS_L1D) {
-                else if ((cache_type == IS_L1D) && (rq_entry.type != PREFETCH)) 
+                else 
                 {
                     // do not forward translation packets back to the core
-                    if (!rq_entry.tlb_access) {
+                    if ((cache_type == IS_L1D) && (rq_entry.type != PREFETCH) && !rq_entry.tlb_access) {
                         if (PROCESSED.occupancy < PROCESSED.SIZE)
                         {
                             PROCESSED.add_queue(&rq_entry, current_core_cycle[read_cpu]);
@@ -1006,6 +1122,16 @@ void CACHE::handle_read()
             }
             else // read miss
             {
+                // Logging: cache miss
+                if (rq_entry.type == TRANSLATION) {
+                    LOG_DEBUG("%s MISS T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
+                    l.log(NAME, "handle_read", "MISS",
+                        "addr", hex2str(rq_entry.address),
+                        "set", set, '\n');
+                } else {
+                    LOG_DEBUG("%s MISS addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
+                }
+                
                 DP ( if (warmup_complete[read_cpu]) {
                 cout << "[" << NAME << "] " << __func__ << " read miss";
                 cout << " instr_id: " << rq_entry.instr_id << " address: " << hex << rq_entry.address;
@@ -1036,6 +1162,11 @@ void CACHE::handle_read()
                             add_mshr(&rq_entry);
                             if(lower_level)
                             {
+                                if (rq_entry.type == TRANSLATION) {
+                                    LOG_DEBUG("%s ADD_RQ T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
+                                } else {
+                                    LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
+                                }
                                 lower_level->add_rq(&rq_entry);
                                 
                                 // @RBERA: if this is a data load missing LLC, then:
@@ -1045,9 +1176,10 @@ void CACHE::handle_read()
                                 {
                                     if(rq_entry.rob_position < 0 || rq_entry.rob_position >= ROB_SIZE)
                                     {
-                                        cout << "invalid ROB position: index: " << index << " pos: " << rq_entry.rob_position << endl;
-                                        cout << rq_entry.to_string() << endl;
-                                        assert(0);
+                                        cerr << "[" << NAME << "_ERROR] invalid ROB position: index=" << index << " pos=" << rq_entry.rob_position;
+                                        cerr << " addr=0x" << hex << rq_entry.address << " full_addr=0x" << rq_entry.full_addr;
+                                        cerr << " instr_id=" << dec << rq_entry.instr_id << " type=" << +rq_entry.type << endl;
+                                        assert(0 && "ROB position out of bounds for LLC load miss");
                                     }
                                     missing_load_rob_pos_hist[rq_entry.rob_position]++;
                                     send_signal_to_core(read_cpu, rq_entry);
@@ -1068,6 +1200,11 @@ void CACHE::handle_read()
                             }
                             else
                             {
+                                if (rq_entry.type == TRANSLATION) {
+                                    LOG_DEBUG("%s ADD_RQ T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
+                                } else {
+                                    LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
+                                }
                                 lower_level->add_rq(&rq_entry);
                             }
                             
@@ -1076,21 +1213,17 @@ void CACHE::handle_read()
                         {
                             if (cache_type == IS_STLB)
                             {
-                                // Pravesh: Comment out PTW page walk related code
-                                // Route STLB miss to PTW (Page Table Walker) module
-                                // The PTW will perform a hierarchical page walk through 4 levels of PwC
-                                /*
-                                if (ooo_cpu[read_cpu].page_table_walker != NULL)
+                                if (knob::enable_ptw && ooo_cpu[read_cpu].page_table_walker != NULL)
                                 {
-                                    // Initiate page walk in PTW
+                                    // Route STLB miss to PTW (Page Table Walker) module
+                                    // The PTW will perform a hierarchical page walk through 4 levels of PwC
                                     ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
                                     // PTW will asynchronously handle the walk and call return_data
                                     // when translation is complete
                                 }
                                 else
-                                */
                                 {
-                                    // Fallback: Direct va_to_pa translation if PTW not available
+                                    // Fallback: Direct va_to_pa translation (PTW disabled or not available)
                                     uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
                                     rq_entry.data = pa >> LOG2_PAGE_SIZE; 
                                     rq_entry.event_cycle = current_core_cycle[read_cpu];
@@ -1112,6 +1245,12 @@ void CACHE::handle_read()
                     else if (mshr_index != -1)  // already in-flight miss
                     {
                         rq_entry.hit_where = assign_hit_where(cache_type, 3); // MSHR hit
+                        
+                        if (rq_entry.type == TRANSLATION) {
+                            l.log(NAME, "handle_read", "MERGE",
+                                "addr", hex2str(rq_entry.address),
+                                "mshr_idx", mshr_index, '\n');
+                        }
 
                         // mark merged consumer
                         if (rq_entry.type == RFO) 
@@ -1211,8 +1350,10 @@ void CACHE::handle_read()
                     }
                     else // WE SHOULD NOT REACH HERE
                     {
-                        cerr << "[" << NAME << "] MSHR errors" << endl;
-                        assert(0);
+                        cerr << "[" << NAME << "] RQ MSHR errors: addr=0x" << hex << rq_entry.address
+                             << " full_addr=0x" << rq_entry.full_addr << dec
+                             << " instr_id=" << rq_entry.instr_id << " type=" << +rq_entry.type << endl;
+                        assert(0 && "RQ MSHR processing error");
                     }
                 }
 
@@ -1262,6 +1403,10 @@ void CACHE::handle_read()
 	    }
     }
 }
+
+// =====================================================================
+// PREFETCH OPERATIONS - Handle prefetch requests
+// =====================================================================
 
 void CACHE::handle_prefetch()
 {
@@ -1493,8 +1638,10 @@ void CACHE::handle_prefetch()
                     }
                     else // WE SHOULD NOT REACH HERE
                     { 
-                        cerr << "[" << NAME << "] MSHR errors" << endl;
-                        assert(0);
+                        cerr << "[" << NAME << "] PQ MSHR errors: addr=0x" << hex << PQ.entry[index].address
+                             << " full_addr=0x" << PQ.entry[index].full_addr << dec
+                             << " instr_id=" << PQ.entry[index].instr_id << " type=" << +PQ.entry[index].type << endl;
+                        assert(0 && "PQ MSHR processing error");
                     }
                 }
 
@@ -1528,6 +1675,10 @@ void CACHE::handle_prefetch()
     }
 }
 
+// =====================================================================
+// MAIN SIMULATION CYCLE - Orchestrates all cache operations
+// =====================================================================
+
 void CACHE::operate()
 {
     handle_fill();
@@ -1538,6 +1689,10 @@ void CACHE::operate()
     if (PQ.occupancy && (reads_available_this_cycle > 0))
         handle_prefetch();
 }
+
+// =====================================================================
+// CACHE UTILITY FUNCTIONS - Address mapping, set/way computation
+// =====================================================================
 
 uint32_t CACHE::get_set(uint64_t address)
 {
@@ -1558,18 +1713,27 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 {
 #ifdef SANITY_CHECK
     if (cache_type == IS_ITLB) {
-        if (packet->data == 0)
-            assert(0);
+        if (packet->data == 0) {
+            cerr << "[" << NAME << "_ERROR] ITLB fill with null data: addr=0x" << hex << packet->address;
+            cerr << " full_addr=0x" << packet->full_addr << " instr_id=" << dec << packet->instr_id << endl;
+            assert(0 && "ITLB packet data is null");
+        }
     }
 
     if (cache_type == IS_DTLB) {
-        if (packet->data == 0)
-            assert(0);
+        if (packet->data == 0) {
+            cerr << "[" << NAME << "_ERROR] DTLB fill with null data: addr=0x" << hex << packet->address;
+            cerr << " full_addr=0x" << packet->full_addr << " instr_id=" << dec << packet->instr_id << endl;
+            assert(0 && "DTLB packet data is null");
+        }
     }
 
     if (cache_type == IS_STLB) {
-        if (packet->data == 0)
-            assert(0);
+        if (packet->data == 0) {
+            cerr << "[" << NAME << "_ERROR] STLB fill with null data: addr=0x" << hex << packet->address;
+            cerr << " full_addr=0x" << packet->full_addr << " instr_id=" << dec << packet->instr_id << endl;
+            assert(0 && "STLB packet data is null");
+        }
     }
 #endif
     if (block[set][way].prefetch && (block[set][way].used == 0))
@@ -1623,7 +1787,7 @@ int CACHE::check_hit(PACKET *packet)
         cerr << "[" << NAME << "_ERROR] " << __func__ << " invalid set index: " << set << " NUM_SET: " << NUM_SET;
         cerr << " address: " << hex << packet->address << " full_addr: " << packet->full_addr << dec;
         cerr << " event: " << packet->event_cycle << endl;
-        assert(0);
+        assert(0 && "Set index exceeds NUM_SET boundary");
     }
 
     // perfect cache
@@ -1696,6 +1860,10 @@ int CACHE::check_hit(PACKET *packet)
     return match_way;
 }
 
+// =====================================================================
+// CACHE INVALIDATION & REQUEST QUEUE MANAGEMENT
+// =====================================================================
+
 int CACHE::invalidate_entry(uint64_t inval_addr)
 {
     uint32_t set = get_set(inval_addr);
@@ -1704,7 +1872,7 @@ int CACHE::invalidate_entry(uint64_t inval_addr)
     if (NUM_SET < set) {
         cerr << "[" << NAME << "_ERROR] " << __func__ << " invalid set index: " << set << " NUM_SET: " << NUM_SET;
         cerr << " inval_addr: " << hex << inval_addr << dec << endl;
-        assert(0);
+        assert(0 && "Set index exceeds NUM_SET in invalidate operation");
     }
 
     // invalidate
@@ -1729,10 +1897,20 @@ int CACHE::invalidate_entry(uint64_t inval_addr)
 
 int CACHE::add_rq(PACKET *packet)
 {
+    // Logging: add_rq entry
+    if (packet->type == TRANSLATION) {
+        LOG_DEBUG("%s ADD_RQ T addr:0x%lx lvl:%d", NAME.c_str(), packet->address, packet->fill_level);
+    } else {
+        LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), packet->address, packet->type);
+    }
+    
+    l.log(NAME, "add_rq", hex2str(packet->address), hex2str(packet->full_addr), "vaddr=", packet->ptw_level, "instr=", packet->instr_id, '\n');
+
     // check for the latest writebacks in the write queue
     int wq_index = WQ.check_queue(packet);
     if (wq_index != -1) 
     {
+        l.log(NAME, "WQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
         packet->hit_where = assign_hit_where(cache_type, 2); // hit in WQ
 
         // check fill level
@@ -1765,12 +1943,18 @@ int CACHE::add_rq(PACKET *packet)
         }
 
 #ifdef SANITY_CHECK
-        if (cache_type == IS_ITLB)
-            assert(0);
-        else if (cache_type == IS_DTLB)
-            assert(0);
-        else if (cache_type == IS_L1I)
-            assert(0);
+        if (cache_type == IS_ITLB) {
+            cerr << "[" << NAME << "] Unexpected WQ hit in ITLB. Packet addr: 0x" << hex << packet->address << dec << " instr_id: " << packet->instr_id << endl;
+            assert(0 && "ITLB WQ hit unexpected");
+        }
+        else if (cache_type == IS_DTLB) {
+            cerr << "[" << NAME << "] Unexpected WQ hit in DTLB. Packet addr: 0x" << hex << packet->address << dec << " instr_id: " << packet->instr_id << endl;
+            assert(0 && "DTLB WQ hit unexpected");
+        }
+        else if (cache_type == IS_L1I) {
+            cerr << "[" << NAME << "] Unexpected WQ hit in L1I. Packet addr: 0x" << hex << packet->address << dec << " instr_id: " << packet->instr_id << endl;
+            assert(0 && "L1I WQ hit unexpected");
+        }
 #endif
         // update processed packets
         if ((cache_type == IS_L1D) && (packet->type != PREFETCH)) 
@@ -1797,6 +1981,7 @@ int CACHE::add_rq(PACKET *packet)
     int index = RQ->check_queue(packet);
     if (index != -1) 
     {
+        l.log(NAME, "RQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
         packet->hit_where = assign_hit_where(cache_type, 1); // hit in RQ
         PACKET& rq_entry = RQ->get_entry(index);
 
@@ -1888,8 +2073,11 @@ int CACHE::add_rq(PACKET *packet)
     cout << " type: " << +rq_entry.type << " head: " << RQ->get_head() << " tail: " << RQ->get_tail() << " occupancy: " << RQ->occupancy;
     cout << " event: " << rq_entry.event_cycle << " current: " << current_core_cycle[rq_entry.cpu] << endl; });
 
-    if (packet->address == 0)
-        assert(0);
+    if (packet->address == 0) {
+        cerr << "[" << NAME << "_ERROR] RQ packet with zero address: instr_id=" << packet->instr_id;
+        cerr << " type=" << +packet->type << " cpu=" << packet->cpu << endl;
+        assert(0 && "RQ packet address is zero");
+    }
 
     RQ->TO_CACHE++;
     RQ->ACCESS++;
@@ -1911,8 +2099,12 @@ int CACHE::add_wq(PACKET *packet)
     }
 
     // sanity check
-    if (WQ.occupancy >= WQ.SIZE)
-        assert(0);
+    if (WQ.occupancy >= WQ.SIZE) {
+        cerr << "[" << NAME << "_ERROR] WQ overflow: occupancy=" << WQ.occupancy << " SIZE=" << WQ.SIZE;
+        cerr << " addr=0x" << hex << packet->address << " full_addr=0x" << packet->full_addr;
+        cerr << " instr_id=" << dec << packet->instr_id << " type=" << +packet->type << endl;
+        assert(0 && "Write queue is full");
+    }
 
     // if there is no duplicate, add it to the write queue
     uint64_t enque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
@@ -2164,8 +2356,11 @@ int CACHE::add_pq(PACKET *packet)
     cout << " type: " << +PQ.entry[index].type << " head: " << PQ.head << " tail: " << PQ.tail << " occupancy: " << PQ.occupancy;
     cout << " event: " << PQ.entry[index].event_cycle << " current: " << current_core_cycle[PQ.entry[index].cpu] << endl; });
 
-    if (packet->address == 0)
-        assert(0);
+    if (packet->address == 0) {
+        cerr << "[" << NAME << "_ERROR] PQ packet with zero address: instr_id=" << packet->instr_id;
+        cerr << " type=" << +packet->type << " cpu=" << packet->cpu << endl;
+        assert(0 && "PQ packet address is zero");
+    }
 
     PQ.TO_CACHE++;
     PQ.ACCESS++;
@@ -2173,8 +2368,23 @@ int CACHE::add_pq(PACKET *packet)
     return -1;
 }
 
+// =====================================================================
+// RESPONSE HANDLING - Complete requests and route responses upward
+// =====================================================================
+// Pravesh: This section includes PTW page table walker integration
+//
+
 void CACHE::return_data(PACKET *packet)
 {
+    // Logging: return data
+    if (packet->type == TRANSLATION) {
+        LOG_DEBUG("%s RETURN T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), packet->address, packet->fill_level, (int)packet->hit_where);
+    } else {
+        LOG_DEBUG("%s RETURN addr:0x%lx typ:%d", NAME.c_str(), packet->address, packet->type);
+    }
+    
+    l.log(NAME, "return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), '\n');
+
     // check MSHR information
     int mshr_index = check_mshr(packet);
 
@@ -2184,7 +2394,7 @@ void CACHE::return_data(PACKET *packet)
         cerr << " full_addr: " << hex << packet->full_addr;
         cerr << " address: " << packet->address << dec;
         cerr << " event: " << packet->event_cycle << " current: " << current_core_cycle[packet->cpu] << endl;
-        assert(0);
+        assert(0 && "MSHR entry not found for returning packet");
     }
 
     // MSHR holds the most updated information about this request
@@ -2193,6 +2403,8 @@ void CACHE::return_data(PACKET *packet)
     MSHR.entry[mshr_index].returned = COMPLETED;
     MSHR.entry[mshr_index].data = packet->data;
     MSHR.entry[mshr_index].pf_metadata = packet->pf_metadata;
+    MSHR.entry[mshr_index].hit_where= assign_hit_where(packet->hit_where, 0);
+
 
     // ADD LATENCY
     if (MSHR.entry[mshr_index].event_cycle < current_core_cycle[packet->cpu])
@@ -2201,16 +2413,6 @@ void CACHE::return_data(PACKET *packet)
         MSHR.entry[mshr_index].event_cycle += LATENCY;
 
     update_fill_cycle();
-
-    // Pravesh: Comment out PTW memory response handling
-    // if this packet originated from the PTW module, notify it of the response
-    /*
-    if (packet->from_ptw && packet->cpu < NUM_CPUS) {
-        if (ooo_cpu[packet->cpu].page_table_walker != NULL) {
-            ooo_cpu[packet->cpu].page_table_walker->handle_memory_response(packet);
-        }
-    }
-    */
 
     DP (if (warmup_complete[packet->cpu]) {
     cout << "[" << NAME << "_MSHR] " <<  __func__ << " instr_id: " << MSHR.entry[mshr_index].instr_id;
@@ -2250,6 +2452,10 @@ void CACHE::update_fill_cycle()
         cout << " event: " << MSHR.entry[min_index].event_cycle << " current: " << current_core_cycle[MSHR.entry[min_index].cpu] << " next: " << MSHR.next_fill_cycle << endl; });
     }
 }
+
+// =====================================================================
+// MSHR MANAGEMENT - Miss Status Holding Register operations
+// =====================================================================
 
 int CACHE::check_mshr(PACKET *packet)
 {
@@ -2504,6 +2710,10 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
         else if(where_in_cache == 2)    return hit_where_t::LLC_WQ;
         else if(where_in_cache == 3)    return hit_where_t::LLC_MSHR;
     }
+    else if(cache_type == DRAM)
+    {
+       return hit_where_t::DRAM;
+    }
 
     return hit_where_t::INV;
 }
@@ -2517,11 +2727,10 @@ void CACHE::send_signal_to_core(uint32_t cpu, PACKET packet)
     uint32_t rob_index = packet.rob_index;
     if(ooo_cpu[cpu].LQ.entry[lq_index].rob_index != rob_index)
     {
-        cout << "rob_index in LQ entry does not match with the rob_index from RQ entry"
-            << " rob_index from LQ: " << ooo_cpu[cpu].LQ.entry[lq_index].rob_index
-            << " rob_index from RQ: " << rob_index
-            << "packet type: " << packet.type << endl;
-        assert(0);
+        cerr << "[" << NAME << "_ERROR] rob_index mismatch: LQ rob_index=" << ooo_cpu[cpu].LQ.entry[lq_index].rob_index;
+        cerr << " RQ rob_index=" << rob_index << " packet type=" << +packet.type;
+        cerr << " addr=0x" << hex << packet.address << " instr_id=" << dec << packet.instr_id << endl;
+        assert(0 && "LQ and RQ rob_index mismatch");
     }
 #endif
 

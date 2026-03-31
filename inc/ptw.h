@@ -9,17 +9,29 @@
 #include "block.h"
 
 // Page Walk Cache (PwC) configuration for 4 levels
+// Fully associative (single set) per level; total entries preserved.
 // Each level corresponds to page table level (4, 3, 2, 1 in x86-64)
-#define PWC_L4_SETS 64      // PML4 level cache
-#define PWC_L4_WAYS 4
-#define PWC_L3_SETS 128     // PDPT level cache
-#define PWC_L3_WAYS 4
-#define PWC_L2_SETS 256     // PD level cache
-#define PWC_L2_WAYS 8
-#define PWC_L1_SETS 512     // PT level cache
-#define PWC_L1_WAYS 8
+#define PWC_L4_SETS 1       // PML4 level cache
+#define PWC_L4_WAYS 8
+#define PWC_L3_SETS 1       // PDPT level cache
+#define PWC_L3_WAYS 8
+#define PWC_L2_SETS 1       // PD level cache
+#define PWC_L2_WAYS 16
+#define PWC_L1_SETS 1       // PT level cache
+#define PWC_L1_WAYS 16
 
 #define PWC_TOTAL_LEVELS 4
+#define PTW_MSHR_SIZE    16
+
+// Shared per-level stats carried by both OutstandingWalk and PTW_MSHR_Entry
+struct PTW_LevelStats {
+    uint64_t access_count;  // accesses to this level
+    uint64_t hit_count;     // cache hits at this level
+    uint64_t miss_count;    // cache misses at this level
+    uint8_t  hit_where;     // where result came from (0=PwC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM)
+    uint8_t  page_fault;    // 1 if this level had a page fault
+    PTW_LevelStats() : access_count(0), hit_count(0), miss_count(0), hit_where(0), page_fault(0) {}
+};
 
 // PwC entry for level-specific translations
 struct PwC_Entry {
@@ -59,50 +71,49 @@ public:
     class CACHE *dtlb_cache;
     class CACHE *itlb_cache;
 
-    // page allocation tracking (57-bit physical addresses)
-    std::unordered_map<uint64_t, uint64_t> vpage_to_ppage; // virtual page -> physical page
-    uint64_t next_free_ppage; // simple sequential allocator
-
-    // allocate a new physical page
-    uint64_t allocate_page();
+    // CPU-indexed CR3 register base addresses (100GB stride)
+    uint64_t cr3_base_addrs[NUM_CPUS];
 
     
     // 4 levels of Page Walk Cache
     PageWalkCacheLevel level_caches[PWC_TOTAL_LEVELS];
     
-    // Outstanding page walk requests
+    // Outstanding page walk requests (pending, not yet dispatched to memory)
     struct OutstandingWalk {
         uint64_t vaddr;
-        uint64_t current_level;
-        uint64_t current_pa;
+        int      current_level;   // level to process next (3=PML4 down to 0=PT)
+        uint64_t current_pa;      // page-table base address for current_level
         uint64_t requested_cycle;
         uint32_t instr_id;
-        PACKET *packet;
-        bool waiting;           // waiting for memory response
-        
-        // Per-level statistics for this walk
-        struct LevelStats {
-            uint64_t access_count;  // accesses to this level
-            uint64_t hit_count;     // cache hits at this level
-            uint64_t miss_count;    // cache misses at this level
-            uint8_t hit_where;      // where result came from (PwC, L1D, L2C, LLC, DRAM)
-            uint8_t page_fault;     // 1 if this level had a page fault
-        } level_stats[PWC_TOTAL_LEVELS];
-        
+        PACKET   packet;          // original STLB packet, copied by value
+        PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
-        
-        OutstandingWalk() : total_page_faults(0) {
-            for (uint32_t i = 0; i < PWC_TOTAL_LEVELS; i++) {
-                level_stats[i].access_count = 0;
-                level_stats[i].hit_count = 0;
-                level_stats[i].miss_count = 0;
-                level_stats[i].hit_where = 0;
-                level_stats[i].page_fault = 0;
-            }
-        }
+        OutstandingWalk() : vaddr(0), current_level(3), current_pa(0),
+                            requested_cycle(0), instr_id(0), total_page_faults(0) {}
     };
-    
+
+    // MSHR entry for in-flight page table memory requests
+    // Fixed-size array ensures pointer stability (ptw_walk_ptr points here)
+    struct PTW_MSHR_Entry {
+        bool     valid;
+        bool     piggyback;      // true = did NOT send its own L1D request; waits for a
+                                 // primary entry at the same (current_pa, current_level)
+        uint64_t vaddr;
+        int      current_level;  // level of the in-flight PTE request
+        uint64_t current_pa;     // PTE byte address sent to memory (PwC insert key)
+        uint64_t table_base_pa;  // page-table base for current_level (to re-queue walk)
+        uint64_t requested_cycle;
+        uint32_t instr_id;
+        PACKET   packet;         // original STLB packet, copied by value
+        PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
+        uint64_t total_page_faults;
+        PTW_MSHR_Entry() : valid(false), piggyback(false), vaddr(0), current_level(0),
+                           current_pa(0), table_base_pa(0),
+                           requested_cycle(0), instr_id(0), total_page_faults(0) {}
+    };
+
     std::deque<OutstandingWalk> outstanding_walks;
+    PTW_MSHR_Entry mshr[PTW_MSHR_SIZE];  // fixed-size, pointer-stable
     
     // Statistics
     struct {
@@ -150,9 +161,6 @@ public:
     // Initiate a page walk for a virtual address
     void initiate_page_walk(PACKET *packet, uint64_t vaddr);
     
-    // Process page walk for a specific level
-    uint64_t walk_page_table_level(uint64_t vaddr, uint32_t level, uint64_t current_pa);
-    
     // Lookup in PwC at a specific level
     bool pwc_lookup(uint64_t vaddr, uint32_t level, uint64_t &paddr);
     
@@ -172,20 +180,21 @@ public:
     void handle_memory_response(PACKET *packet);
     
     // Complete a page walk and return to STLB
-    void complete_page_walk(OutstandingWalk &walk, uint64_t translated_pa);
+    void complete_page_walk(PACKET &pkt, uint64_t translated_pa);
+
+    // Find a free MSHR slot; returns index or -1 if full
+    int find_free_mshr();
     
     // Get set index for a PwC level
-    uint32_t get_pwc_set_index(uint64_t vaddr, uint32_t level);
+    uint64_t get_level_index(uint64_t curr_pa, uint32_t level);
+    uint64_t get_level_set(uint64_t curr_pa, uint32_t level);
     
     // Extract virtual address components for different levels
-    uint64_t get_level_vaddr_tag(uint64_t vaddr, uint32_t level);
-    
-    // Get the next level page table physical address from current PTE
-    uint64_t extract_next_level_pa(uint64_t pte);
-    
+    uint64_t get_level_tag(uint64_t curr_pa, uint32_t level);
+  
     // Check if walk can proceed
     bool is_walk_queue_available();
-    
+
     // Print PTW statistics
     void print_stats();
     void print_config();
@@ -197,8 +206,6 @@ private:
     // Helper function to find victim
     uint32_t find_victim(uint32_t set, uint32_t level);
     
-    // Helper function to get PwC level parameters
-    void get_level_params(uint32_t level, uint32_t &sets, uint32_t &ways);
 };
 
 #endif // PTW_H

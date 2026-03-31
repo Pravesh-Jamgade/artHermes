@@ -3,6 +3,8 @@
 #include "ooo_cpu.h"
 #include "uncore.h"
 #include "util.h"
+#include "logging.h"
+#include "buddy_allocator.h"
 
 namespace knob
 {
@@ -177,30 +179,66 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
     }
 
     // at this point, the scheduler knows which bank to access and if the request is a row buffer hit or miss
-    if (index != -1) // scheduler might not find anything if all requests are already scheduled or all banks are busy
+    // scheduler might not find anything if all requests are already scheduled or all banks are busy
+    
+    if (index != -1)
     { 
         uint64_t op_addr = queue->entry[index].address;
         uint32_t op_cpu = queue->entry[index].cpu,
-                 op_rob_pos = queue->entry[index].rob_position,
-                 op_channel = dram_get_channel(op_addr), 
-                 op_rank = dram_get_rank(op_addr), 
-                 op_bank = dram_get_bank(op_addr), 
-                 op_row = dram_get_row(op_addr);
+                    op_rob_pos = queue->entry[index].rob_position,
+                    op_channel = dram_get_channel(op_addr), 
+                    op_rank = dram_get_rank(op_addr), 
+                    op_bank = dram_get_bank(op_addr), 
+                    op_row = dram_get_row(op_addr);
 #ifdef DEBUG_PRINT
         uint32_t op_column = dram_get_column(op_addr);
 #endif
 
+        // For TRANSLATION packets the PTW reads packet->data as the physical base
+        // address of the next-level page table (or physical frame for the leaf level).
+        // Derive it from the PTE's byte address: the page that contains this PTE is
+        // allocated by the buddy allocator, so use its physical frame address.
+        uint64_t page_num = queue->entry[index].full_addr >> LOG2_PAGE_SIZE;
         uint64_t LATENCY = 0;
+        bool page_fault = false;
+        // For a translation request, we need to check if the page table entry being accessed has a valid 
+        // physical page allocated in DRAM. If not, we need to allocate a physical page (which may involve 
+        // evicting another page) before we can return the translation result. This models the latency of 
+        // handling a page fault for a translation request.
+        {
+            if (queue->entry[index].type == TRANSLATION) 
+            {
+                // check if page table has entry allocated in DRAM
+                uint64_t req_pte_addr = queue->entry[index].address;
+                uint64_t pte_data = 0;
+                buddy_allocator.shadow_get_entry(req_pte_addr, queue->entry[index].ptw_level, pte_data, page_fault);
+
+                // real allocation — let buddy allocator pick any free physical page
+                if (page_fault) {
+                    pte_data = buddy_allocator.access();
+                    // Store into shadow and clear page_fault so future cache hits return correct value.
+                    buddy_allocator.shadow_set_entry(queue->entry[index].full_addr, 
+                                        (uint8_t)queue->entry[index].ptw_level, pte_data);
+                }
+    
+                queue->entry[index].data = pte_data;
+                l.log(queue->NAME, "translation_return", hex2str(queue->entry[index].address), hex2str(queue->entry[index].full_addr), queue->entry[index].ptw_level, "data", hex2str(queue->entry[index].data), '\n');
+            }
+        }
+
+        if (page_fault) {
+            LATENCY += PAGE_FAULT_LATENCY;
+        }
+
         if (row_buffer_hit)  
-            LATENCY = tCAS;
+            LATENCY += tCAS;
         else 
-            LATENCY = tRP + tRCD + tCAS;
+            LATENCY += tRP + tRCD + tCAS;
 
         // model pseudo direct DRAM prefetch
         if(knob::enable_pseudo_direct_dram_prefetch && queue->entry[index].is_data)
         {
-            // model only for loads, and also for prefetch requests if enabled
-            if(queue->entry[index].type == LOAD || (queue->entry[index].type == PREFETCH && knob::enable_pseudo_direct_dram_prefetch_on_prefetch))
+            if(queue->entry[index].type == LOAD || queue->entry[index].type == TRANSLATION  || (queue->entry[index].type == PREFETCH && knob::enable_pseudo_direct_dram_prefetch_on_prefetch))
             {
                 uint8_t op_rob_part_type = ooo_cpu[op_cpu].rob_pos_get_part_type(op_rob_pos);
                 if(knob::pseudo_direct_dram_prefetch_rob_part_type == NUM_PARTITION_TYPES 
@@ -214,9 +252,6 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
                     }
                     else
                     {
-                        // the real headroom might be even higher than this
-                        // when total on-chip cache lookup latency will be much higher 
-                        // than the row buffer hit latency
                         LATENCY = 0;
                         stats.pseudo_direct_dram_prefetch.zero_lat++;
                     }
@@ -344,6 +379,7 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
             } 
             else 
             {
+                queue->entry[request_index].hit_where = hit_where_t::DRAM;
                 // update data bus cycle time
                 dbus_cycle_available[op_channel] = current_core_cycle[op_cpu] + DRAM_DBUS_RETURN_TIME;
                 queue->entry[request_index].event_cycle = dbus_cycle_available[op_channel]; 
@@ -445,6 +481,25 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     // simply return read requests with dummy response before the warmup
     if (all_warmup_complete < NUM_CPUS && return_data_to_core) 
     {
+        if (packet->type == TRANSLATION) {
+            // check if page table has entry allocated in DRAM
+            uint64_t req_pte_addr = packet->full_addr;
+            uint64_t pte_data = 0;
+            bool is_pf = false;
+            bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
+
+            // real allocation — let buddy allocator pick any free physical page
+            if (is_pf) {
+                pte_data = buddy_allocator.access();
+                // Store into shadow and clear page_fault so future cache hits return correct value.
+                buddy_allocator.shadow_set_entry(packet->full_addr, (uint8_t)packet->ptw_level, pte_data);
+            }
+            
+            // return pte value to cache hierarchy
+            packet->data = pte_data;
+            l.log(NAME, "fast-translation_return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), "pf", is_pf, "found_pte", found_pte, '\n');
+        }
+
         if (packet->instruction) 
             upper_level_icache[packet->cpu]->return_data(packet);
         if (packet->is_data)

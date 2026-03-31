@@ -90,7 +90,8 @@ void O3_CPU::read_from_trace()
                 if (trace_file == NULL) 
                 {
                     cerr << endl << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
-                    assert(0);
+                    cerr << "CPU " << cpu << " trace: " << trace_string << endl;
+                    assert(0 && "Failed to reopen trace file after EOF");
                 }
             } 
             else // successfully read the trace
@@ -126,8 +127,12 @@ void O3_CPU::read_from_trace()
 #ifdef SANITY_CHECK
                             if (STA[STA_tail] < UINT64_MAX) 
                             {
-                                if (STA_head != STA_tail)
-                                    assert(0);
+                                if (STA_head != STA_tail) {
+                                    cerr << "[STA_ERROR] STA head/tail mismatch: head=" << STA_head << " tail=" << STA_tail;
+                                    cerr << " STA[tail]=" << STA[STA_tail] << " instr_id=" << instr_unique_id;
+                                    cerr << " cpu=" << cpu << endl;
+                                    assert(0 && "STA array head/tail inconsistency");
+                                }
                             }
 #endif
                             STA[STA_tail] = instr_unique_id;
@@ -228,7 +233,8 @@ void O3_CPU::read_from_trace()
                 if (trace_file == NULL) 
                 {
                     cerr << endl << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
-                        assert(0);
+                    cerr << "CPU " << cpu << " trace: " << trace_string << endl;
+                        assert(0 && "Failed to reopen trace file after EOF (second read attempt)");
                 }
             }
             else // successfully read the trace
@@ -302,8 +308,12 @@ void O3_CPU::read_from_trace()
 #ifdef SANITY_CHECK
                             if (STA[STA_tail] < UINT64_MAX) 
                             {
-                                if (STA_head != STA_tail)
-                                    assert(0);
+                                if (STA_head != STA_tail) {
+                                    cerr << "[STA_ERROR] STA head/tail mismatch: head=" << STA_head << " tail=" << STA_tail;
+                                    cerr << " STA[tail]=" << STA[STA_tail] << " instr_id=" << instr_unique_id;
+                                    cerr << " cpu=" << cpu << endl;
+                                    assert(0 && "STA array head/tail inconsistency (second check)");
+                                }
                             }
 #endif
                             STA[STA_tail] = instr_unique_id;
@@ -494,7 +504,7 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
     if (ROB.entry[index].instr_id != 0) {
         cerr << "[ROB_ERROR] " << __func__ << " is not empty index: " << index;
         cerr << " instr_id: " << ROB.entry[index].instr_id << endl;
-        assert(0);
+        assert(0 && "ROB entry already occupied");
     }
 
     ROB.entry[index] = *arch_instr;
@@ -515,7 +525,7 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
     if (ROB.entry[index].ip == 0) {
         cerr << "[ROB_ERROR] " << __func__ << " ip is zero index: " << index;
         cerr << " instr_id: " << ROB.entry[index].instr_id << " ip: " << ROB.entry[index].ip << endl;
-        assert(0);
+        assert(0 && "ROB instruction pointer is null");
     }
 #endif
     
@@ -548,7 +558,7 @@ uint32_t O3_CPU::add_to_ifetch_buffer(ooo_model_instr *arch_instr)
     {
       cerr << "[IFETCH_BUFFER_ERROR] " << __func__ << " is not empty index: " << index;
       cerr << " instr_id: " << IFETCH_BUFFER.entry[index].instr_id << endl;
-      assert(0);
+      assert(0 && "IFETCH_BUFFER entry already occupied");
     }
 
   IFETCH_BUFFER.entry[index] = *arch_instr;
@@ -583,7 +593,7 @@ uint32_t O3_CPU::add_to_decode_buffer(ooo_model_instr *arch_instr)
     {
         cerr << "[DECODE_BUFFER_ERROR] " << __func__ << " is not empty index: " << index;
         cerr << " instr_id: " << IFETCH_BUFFER.entry[index].instr_id << endl;
-        assert(0);
+        assert(0 && "DECODE_BUFFER entry already occupied");
     }
 
     DECODE_BUFFER.entry[index] = *arch_instr;
@@ -634,8 +644,8 @@ uint32_t O3_CPU::check_rob(uint64_t instr_id)
     }
 
     cerr << "[ROB_ERROR] " << __func__ << " does not have any matching index! ";
-    cerr << " instr_id: " << instr_id << endl;
-    assert(0);
+    cerr << " instr_id: " << instr_id << " cpu: " << cpu << endl;
+    assert(0 && "ROB entry not found for instruction ID");
 
     return ROB.SIZE;
 }
@@ -896,8 +906,8 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 {
   if(pf_v_addr == 0)
     {
-      cerr << "Cannot prefetch code line 0x0 !!!" << endl;
-      assert(0);
+      cerr << "Cannot prefetch code line 0x0 !!! cpu: " << cpu << endl;
+      assert(0 && "Attempt to prefetch instruction at address 0");
     }
   
   L1I.pf_requested++;
@@ -995,8 +1005,11 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
         if (ROB.entry[rob_index].reg_ready) 
         {
 #ifdef SANITY_CHECK
-            if (RTE1[RTE1_tail] < ROB_SIZE)
-                assert(0);
+            if (RTE1[RTE1_tail] < ROB_SIZE) {
+                cerr << "[RTE1_ERROR] RTE1 tail occupied: tail=" << RTE1_tail << " value=" << RTE1[RTE1_tail];
+                cerr << " rob_index=" << rob_index << " instr_id=" << ROB.entry[rob_index].instr_id << endl;
+                assert(0 && "RTE1 array tail position already occupied");
+            }
 #endif
             // remember this rob_index in the Ready-To-Execute array 1
             RTE1[RTE1_tail] = rob_index;
@@ -1242,7 +1255,7 @@ void O3_CPU::execute_memory_instruction()
     operate_lsq();
     operate_cache();
     // Pravesh: Comment out PTW operate call
-    // operate_ptw();
+    operate_ptw();
 }
 
 void O3_CPU::do_memory_scheduling(uint32_t rob_index)
@@ -1324,8 +1337,9 @@ uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index)
     uint32_t not_available = num_mem_ops - num_added;
     if (not_available > num_mem_ops) 
     {
-        cerr << "instr_id: " << ROB.entry[rob_index].instr_id << endl;
-        assert(0);
+        cerr << "[MEM_OPS_ERROR] not_available underflow: num_mem_ops=" << num_mem_ops << " num_added=" << num_added;
+        cerr << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index=" << rob_index << endl;
+        assert(0 && "Memory operations count underflow");
     }
 
     return not_available;
@@ -1344,8 +1358,9 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
 
     // sanity check
     if (lq_index == LQ.SIZE) {
-        cerr << "instr_id: " << ROB.entry[rob_index].instr_id << " no empty slot in the load queue!!!" << endl;
-        assert(0);
+        cerr << "[LQ_ERROR] no empty slot in load queue: occupancy=" << LQ.occupancy << " SIZE=" << LQ.SIZE;
+        cerr << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index=" << rob_index << endl;
+        assert(0 && "Load queue is full");
     }
 
     // add it to the load queue
@@ -1460,8 +1475,9 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
             ROB.entry[fwr_rob_index].num_mem_ops--;
             ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
             if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
-                cerr << "instr_id: " << ROB.entry[fwr_rob_index].instr_id << endl;
-                assert(0);
+                cerr << "[ROB_ERROR] num_mem_ops underflow in load forwarding: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
+                cerr << " instr_id: " << ROB.entry[fwr_rob_index].instr_id << " rob_index=" << fwr_rob_index << endl;
+                assert(0 && "Load forwarding caused num_mem_ops underflow");
             }
             if (ROB.entry[fwr_rob_index].num_mem_ops == 0)
                 inflight_mem_executions++;
@@ -1526,8 +1542,11 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
 {
     uint32_t sq_index = SQ.tail;
 #ifdef SANITY_CHECK
-    if (SQ.entry[sq_index].virtual_address)
-        assert(0);
+    if (SQ.entry[sq_index].virtual_address) {
+        cerr << "[SQ_ERROR] SQ tail entry not empty: sq_index=" << sq_index << " vaddr=0x" << hex << SQ.entry[sq_index].virtual_address;
+        cerr << dec << " rob_index=" << rob_index << " instr_id=" << ROB.entry[rob_index].instr_id << endl;
+        assert(0 && "Store queue tail position already occupied");
+    }
 #endif
 
     /*
@@ -1542,8 +1561,9 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
 
     // sanity check
     if (sq_index == SQ.SIZE) {
-        cerr << "instr_id: " << ROB.entry[rob_index].instr_id << " no empty slot in the store queue!!!" << endl;
-        assert(0);
+        cerr << "[SQ_ERROR] no empty slot in store queue: occupancy=" << SQ.occupancy << " SIZE=" << SQ.SIZE;
+        cerr << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index=" << rob_index << endl;
+        assert(0 && "Store queue is full");
     }
     */
 
@@ -1788,8 +1808,9 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
     ROB.entry[rob_index].num_mem_ops--;
     ROB.entry[rob_index].event_cycle = current_core_cycle[cpu];
     if (ROB.entry[rob_index].num_mem_ops < 0) {
-        cerr << "instr_id: " << ROB.entry[rob_index].instr_id << endl;
-        assert(0);
+        cerr << "[ROB_ERROR] num_mem_ops underflow in store execute: num_mem_ops=" << ROB.entry[rob_index].num_mem_ops;
+        cerr << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index=" << rob_index << endl;
+        assert(0 && "Store execution caused num_mem_ops underflow");
     }
     if (ROB.entry[rob_index].num_mem_ops == 0)
         inflight_mem_executions++;
@@ -1811,12 +1832,15 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
                         // now we can resolve RAW dependency
                         uint32_t lq_index = ROB.entry[dependent].lq_index[j];
 #ifdef SANITY_CHECK
-                        if (lq_index >= LQ.SIZE)
-                            assert(0);
+                        if (lq_index >= LQ.SIZE) {
+                            cerr << "[LQ_ERROR] lq_index out of bounds: lq_index=" << lq_index << " LQ.SIZE=" << LQ.SIZE;
+                            cerr << " dependent=" << dependent << " instr_id=" << ROB.entry[dependent].instr_id << endl;
+                            assert(0 && "Load queue index exceeds bounds in RAW dependency");
+                        }
                         if (LQ.entry[lq_index].producer_id != SQ.entry[sq_index].instr_id) {
                             cerr << "[SQ2] " << __func__ << " lq_index: " << lq_index << " producer_id: " << LQ.entry[lq_index].producer_id;
                             cerr << " does not match to the store instr_id: " << SQ.entry[sq_index].instr_id << endl;
-                            assert(0);
+                            assert(0 && "Load producer ID does not match store instruction ID");
                         }
 #endif
                         // update correspodning LQ entry
@@ -1830,8 +1854,9 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
                         ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
 #ifdef SANITY_CHECK
                         if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
-                            cerr << "instr_id: " << ROB.entry[fwr_rob_index].instr_id << endl;
-                            assert(0);
+                            cerr << "[ROB_ERROR] num_mem_ops underflow in RAW resolution: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
+                            cerr << " instr_id: " << ROB.entry[fwr_rob_index].instr_id << " rob_index=" << fwr_rob_index << endl;
+                            assert(0 && "RAW dependency resolution caused num_mem_ops underflow");
                         }
 #endif
                         if (ROB.entry[fwr_rob_index].num_mem_ops == 0)
@@ -1964,8 +1989,11 @@ void O3_CPU::reg_RAW_release(uint32_t rob_index)
                         ROB.entry[i].scheduled = COMPLETED;
 
 #ifdef SANITY_CHECK
-                        if (RTE0[RTE0_tail] < ROB_SIZE)
-                            assert(0);
+                        if (RTE0[RTE0_tail] < ROB_SIZE) {
+                            cerr << "[RTE0_ERROR] RTE0 tail occupied: tail=" << RTE0_tail << " value=" << RTE0[RTE0_tail];
+                            cerr << " rob_index=" << i << " instr_id=" << ROB.entry[i].instr_id << endl;
+                            assert(0 && "RTE0 array tail position already occupied");
+                        }
 #endif
                         // remember this rob_index in the Ready-To-Execute array 0
                         RTE0[RTE0_tail] = i;
@@ -2083,16 +2111,21 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
 void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 {
-    uint32_t index = queue->head,
-             rob_index = queue->entry[index].rob_index,
+    uint32_t index = queue->head;
+    
+    uint32_t rob_index = queue->entry[index].rob_index,
              sq_index = queue->entry[index].sq_index,
              lq_index = queue->entry[index].lq_index;
 
 #ifdef SANITY_CHECK
-    if (queue->entry[index].type != RFO) 
+    // Pravesh: Page table TRANSLATION packets don't have valid ROB index, so skip check
+    if (queue->entry[index].type != RFO && queue->entry[index].type != TRANSLATION) 
     {
-        if (rob_index != check_rob(queue->entry[index].instr_id))
-            assert(0);
+        if (rob_index != check_rob(queue->entry[index].instr_id)) {
+            cerr << "[ROB_ERROR] rob_index mismatch: expected=" << check_rob(queue->entry[index].instr_id) << " actual=" << rob_index;
+            cerr << " instr_id=" << queue->entry[index].instr_id << " type=" << +queue->entry[index].type << endl;
+            assert(0 && "ROB index does not match instruction ID in data fetch completion");
+        }
     }
 #endif
 
@@ -2161,8 +2194,11 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
         else 
         { 
 #ifdef SANITY_CHECK
-            if (queue->entry[index].store_merged)
-                assert(0);
+            if (queue->entry[index].store_merged) {
+                cerr << "[L1D_ERROR] unexpected store_merged flag: instr_id=" << queue->entry[index].instr_id;
+                cerr << " addr=0x" << hex << queue->entry[index].address << " type=" << dec << +queue->entry[index].type << endl;
+                assert(0 && "Store merged flag should not be set for non-RFO loads");
+            }
 #endif
             LQ.entry[lq_index].fetched = COMPLETED;
             LQ.entry[lq_index].event_cycle = current_core_cycle[cpu];
@@ -2172,8 +2208,9 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 #ifdef SANITY_CHECK
             if (ROB.entry[rob_index].num_mem_ops < 0) 
             {
-                cerr << "instr_id: " << ROB.entry[rob_index].instr_id << endl;
-                assert(0);
+                cerr << "[ROB_ERROR] num_mem_ops underflow in L1D completion: num_mem_ops=" << ROB.entry[rob_index].num_mem_ops;
+                cerr << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index=" << rob_index << endl;
+                assert(0 && "L1D load completion caused num_mem_ops underflow");
             }
 #endif
             if (ROB.entry[rob_index].num_mem_ops == 0)

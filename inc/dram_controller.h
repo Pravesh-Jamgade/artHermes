@@ -1,8 +1,9 @@
+
 #ifndef DRAM_H
 #define DRAM_H
 
 #include "memory_class.h"
-#include "defs.h"
+#include "buddy_allocator.h"
 
 extern uint32_t DRAM_MTPS, DRAM_DBUS_RETURN_TIME, DRAM_DBUS_MAX_CAS;
 

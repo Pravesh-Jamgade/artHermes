@@ -402,6 +402,9 @@ namespace knob
     uint32_t ocp_ttp_hash_type = 5;
 	bool     ocp_ttp_enable_track_llc_eviction = true;
 
+	// PTW / Shadow page-table
+	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
+
 	// DDRP
 	bool enable_ddrp = false;
 	uint32_t ddrp_req_latency = 0;
@@ -1856,6 +1859,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	}
 
 	// Direcr DRAM Prefetch (DDRP)
+	else if (MATCH("", "enable_ptw"))
+	{
+		knob::enable_ptw = !strcmp(value, "true") ? true : false;
+	}
 	else if (MATCH("", "enable_ddrp"))
 	{
 		knob::enable_ddrp = !strcmp(value, "true") ? true : false;

@@ -188,8 +188,11 @@ int PACKET_QUEUE::check_queue(PACKET *packet, uint64_t timestamp)
 int PACKET_QUEUE::add_queue(PACKET *packet, uint64_t timestamp)
 {
 #ifdef SANITY_CHECK
-    if (occupancy && (head == tail))
-        assert(0);
+    if (occupancy && (head == tail)) {
+        cerr << "[" << NAME << "_QUEUE_ERROR] head==tail with non-zero occupancy: head=" << head << " tail=" << tail;
+        cerr << " occupancy=" << occupancy << " SIZE=" << SIZE << endl;
+        assert(0 && "Queue head equals tail but occupancy is non-zero");
+    }
 #endif
     
     int location = -1;
@@ -223,8 +226,11 @@ int PACKET_QUEUE::add_queue(PACKET *packet, uint64_t timestamp)
 void PACKET_QUEUE::remove_queue(PACKET *packet, uint64_t timestamp)
 {
 #ifdef SANITY_CHECK
-    if ((occupancy == 0) && (head == tail))
-        assert(0);
+    if ((occupancy == 0) && (head == tail)) {
+        cerr << "[" << NAME << "_QUEUE_ERROR] remove from empty queue: head=" << head << " tail=" << tail;
+        cerr << " occupancy=" << occupancy << " packet instr_id=" << packet->instr_id << endl;
+        assert(0 && "Attempted to remove from empty queue");
+    }
 #endif
 
     DP ( if (warmup_complete[packet->cpu]) {
@@ -298,8 +304,11 @@ int PACKET_QUEUE_PRIORITY::check_queue(PACKET *packet, uint64_t timestamp)
 int PACKET_QUEUE_PRIORITY::add_queue(PACKET *packet, uint64_t timestamp)
 {
     assert(entry.size() >= occupancy);
-    if(occupancy == SIZE)
-        assert(0);
+    if(occupancy == SIZE) {
+        cerr << "[PRIORITY_QUEUE_ERROR] queue is full: occupancy=" << occupancy << " SIZE=" << SIZE;
+        cerr << " packet instr_id=" << packet->instr_id << " addr=0x" << hex << packet->address << dec << endl;
+        assert(0 && "Priority queue is at maximum capacity");
+    }
 
     PACKET enque_packet = *packet;
 
