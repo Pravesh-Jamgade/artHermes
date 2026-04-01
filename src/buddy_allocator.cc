@@ -89,12 +89,13 @@ uint64_t BuddyAllocator::access()
         uint64_t evict = alloc_fifo.front();
         alloc_fifo.pop_front();
         allocated.erase(evict);
-        // // Remove any vpage→pframe mapping for the evicted frame.
-        // auto rit = pframe_to_vpage.find(evict);
-        // if (rit != pframe_to_vpage.end()) {
-        //     vpage_to_pframe.erase(rit->second);
-        //     pframe_to_vpage.erase(rit);
-        // }
+        // Remove any vpage→pframe mapping for the evicted frame.
+        auto rit = pframe_to_vpage.find(evict);
+        if (rit != pframe_to_vpage.end()) {
+            vpage_to_pframe.erase(rit->second);
+            pframe_to_vpage.erase(rit);
+        }
+
         free_page(evict);
     }
 

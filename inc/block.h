@@ -130,6 +130,8 @@ typedef enum
 // message packet
 class PACKET {
   public:
+
+    int fetch_packet = 0;
     uint64_t id; // just a packet id
     static uint64_t next_id;
 
@@ -179,7 +181,8 @@ class PACKET {
 
     uint32_t cpu, data_index, lq_index, sq_index;
 
-    uint64_t address, 
+    uint64_t virt_addr,
+             address, 
              full_addr, 
              instruction_pa,
              data_pa,
@@ -248,6 +251,7 @@ class PACKET {
         lq_index = 0;
         sq_index = 0;
 
+        virt_addr = 0;
         address = 0;
         full_addr = 0;
         instruction_pa = 0;

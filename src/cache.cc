@@ -430,7 +430,7 @@ void CACHE::handle_fill()
                 {
                     if (MSHR.entry[mshr_index].instruction)
                     {
-                                upper_level_icache[fill_cpu]->return_data(&MSHR.entry[mshr_index]);
+                        upper_level_icache[fill_cpu]->return_data(&MSHR.entry[mshr_index]);
                     }
                     if (MSHR.entry[mshr_index].is_data)
                     {
@@ -915,16 +915,20 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
-            if (rq_entry.type == TRANSLATION)
-            {
-                l.log(NAME, "handle_read", "proc",
-                    "idx", index,
-                    "instr_id", rq_entry.instr_id,
-                    "addr", hex2str(rq_entry.address),
-                    "type", rq_entry.type,
-                    "ev", rq_entry.event_cycle,
-                    "cur", current_core_cycle[read_cpu], '\n');
-            }
+            if(rq_entry.instruction)
+            cout  << "R:"<<NAME<<", addr, " << hex << rq_entry.address << ", full_addr, " << rq_entry.full_addr << ", vaddr, " << rq_entry.virt_addr << ", data, " << rq_entry.data << dec << ", ptw_level, " << rq_entry.ptw_level  << endl;
+    
+
+            // if (rq_entry.type == TRANSLATION)
+            // {
+            //     l.log(NAME, "handle_read", "proc",
+            //         "idx", index,
+            //         "instr_id", rq_entry.instr_id,
+            //         "addr", hex2str(rq_entry.address),
+            //         "type", rq_entry.type,
+            //         "ev", rq_entry.event_cycle,
+            //         "cur", current_core_cycle[read_cpu], '\n');
+            // }
 
             // access cache
             uint32_t set = get_set(rq_entry.address);
@@ -938,11 +942,11 @@ void CACHE::handle_read()
                 bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, (uint8_t)rq_entry.ptw_level, shadow_val, is_pf);
 
                 if (is_pf) {
-                    // Entry was initialised but never officially walked by PTW yet.
-                    // Force a miss so the request goes to memory and gets the
-                    // correct PTE value rather than stale cached data.
-                    l.log(NAME, "handle_read", "PTW_FORCED_MISS_PAGE_FAULT",
-                        "addr", hex2str(rq_entry.full_addr), "lvl", rq_entry.ptw_level, '\n');
+                    // // Entry was initialised but never officially walked by PTW yet.
+                    // // Force a miss so the request goes to memory and gets the
+                    // // correct PTE value rather than stale cached data.
+                    // l.log(NAME, "handle_read", "PTW_FORCED_MISS_PAGE_FAULT",
+                    //     "addr", hex2str(rq_entry.full_addr), "lvl", rq_entry.ptw_level, '\n');
                     way = -1; // override: treat as miss
                 } else {
                     // PTW has officially walked this entry — use shadow value.
@@ -963,14 +967,12 @@ void CACHE::handle_read()
                 rq_entry.hit_where = assign_hit_where(cache_type, 0); // read hit
                 
                 // Logging: cache hit
-                if (rq_entry.type == TRANSLATION) {
-                    LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
+                if (rq_entry.type == TRANSLATION && rq_entry.instruction) {
+                    // LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
                     l.log(NAME, "handle_read", "HIT",
                         "addr", hex2str(rq_entry.address),
                         "set", set,
                         "way", way, '\n');
-                } else {
-                    LOG_DEBUG("%s HIT addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
                 }
 
                 if (cache_type == IS_ITLB) 
@@ -1124,10 +1126,10 @@ void CACHE::handle_read()
             {
                 // Logging: cache miss
                 if (rq_entry.type == TRANSLATION) {
-                    LOG_DEBUG("%s MISS T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
-                    l.log(NAME, "handle_read", "MISS",
-                        "addr", hex2str(rq_entry.address),
-                        "set", set, '\n');
+                    // LOG_DEBUG("%s MISS T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
+                    // l.log(NAME, "handle_read", "MISS",
+                    //     "addr", hex2str(rq_entry.address),
+                    //     "set", set, '\n');
                 } else {
                     LOG_DEBUG("%s MISS addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
                 }
@@ -1162,11 +1164,6 @@ void CACHE::handle_read()
                             add_mshr(&rq_entry);
                             if(lower_level)
                             {
-                                if (rq_entry.type == TRANSLATION) {
-                                    LOG_DEBUG("%s ADD_RQ T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
-                                } else {
-                                    LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
-                                }
                                 lower_level->add_rq(&rq_entry);
                                 
                                 // @RBERA: if this is a data load missing LLC, then:
@@ -1200,11 +1197,6 @@ void CACHE::handle_read()
                             }
                             else
                             {
-                                if (rq_entry.type == TRANSLATION) {
-                                    LOG_DEBUG("%s ADD_RQ T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
-                                } else {
-                                    LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
-                                }
                                 lower_level->add_rq(&rq_entry);
                             }
                             
@@ -1246,11 +1238,11 @@ void CACHE::handle_read()
                     {
                         rq_entry.hit_where = assign_hit_where(cache_type, 3); // MSHR hit
                         
-                        if (rq_entry.type == TRANSLATION) {
-                            l.log(NAME, "handle_read", "MERGE",
-                                "addr", hex2str(rq_entry.address),
-                                "mshr_idx", mshr_index, '\n');
-                        }
+                        // if (rq_entry.type == TRANSLATION) {
+                        //     l.log(NAME, "handle_read", "MERGE",
+                        //         "addr", hex2str(rq_entry.address),
+                        //         "mshr_idx", mshr_index, '\n');
+                        // }
 
                         // mark merged consumer
                         if (rq_entry.type == RFO) 
@@ -1904,13 +1896,13 @@ int CACHE::add_rq(PACKET *packet)
         LOG_DEBUG("%s ADD_RQ addr:0x%lx typ:%d", NAME.c_str(), packet->address, packet->type);
     }
     
-    l.log(NAME, "add_rq", hex2str(packet->address), hex2str(packet->full_addr), "vaddr=", packet->ptw_level, "instr=", packet->instr_id, '\n');
+    // l.log(NAME, "add_rq", hex2str(packet->address), hex2str(packet->full_addr), "lvl=", packet->ptw_level, "instr=", packet->instr_id, "fetch=", packet->fetch_packet, '\n');
 
     // check for the latest writebacks in the write queue
     int wq_index = WQ.check_queue(packet);
     if (wq_index != -1) 
     {
-        l.log(NAME, "WQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
+        // l.log(NAME, "WQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "fetch=", packet->fetch_packet, '\n');
         packet->hit_where = assign_hit_where(cache_type, 2); // hit in WQ
 
         // check fill level
@@ -1981,7 +1973,7 @@ int CACHE::add_rq(PACKET *packet)
     int index = RQ->check_queue(packet);
     if (index != -1) 
     {
-        l.log(NAME, "RQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
+        // l.log(NAME, "RQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
         packet->hit_where = assign_hit_where(cache_type, 1); // hit in RQ
         PACKET& rq_entry = RQ->get_entry(index);
 
@@ -2376,14 +2368,10 @@ int CACHE::add_pq(PACKET *packet)
 
 void CACHE::return_data(PACKET *packet)
 {
-    // Logging: return data
-    if (packet->type == TRANSLATION) {
-        LOG_DEBUG("%s RETURN T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), packet->address, packet->fill_level, (int)packet->hit_where);
-    } else {
-        LOG_DEBUG("%s RETURN addr:0x%lx typ:%d", NAME.c_str(), packet->address, packet->type);
-    }
+    if(packet->instruction)
+    cout <<NAME<<", addr, " << hex << packet->address << ", full_addr, " << packet->full_addr << ", vaddr, " << packet->virt_addr << ", data, " << packet->data << dec << ", ptw_level, " << packet->ptw_level  << endl;
     
-    l.log(NAME, "return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), '\n');
+    // l.log(NAME, "return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), '\n');
 
     // check MSHR information
     int mshr_index = check_mshr(packet);

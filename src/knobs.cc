@@ -12,8 +12,8 @@ using namespace std;
 
 namespace knob
 {
-	uint64_t warmup_instructions = 1000000;
-	uint64_t simulation_instructions = 1000000;
+	uint64_t warmup_instructions = 0;
+	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
 	vector<string> 	 l1d_prefetcher_types;
@@ -402,9 +402,7 @@ namespace knob
     uint32_t ocp_ttp_hash_type = 5;
 	bool     ocp_ttp_enable_track_llc_eviction = true;
 
-	// PTW / Shadow page-table
-	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
-
+	
 	// DDRP
 	bool enable_ddrp = false;
 	uint32_t ddrp_req_latency = 0;
@@ -418,6 +416,14 @@ namespace knob
     // int32_t  ddrp_monitor_scooby_reward_incorrect = -20;
     // int32_t  ddrp_monitor_scooby_reward_none = -4;
 	bool ddrp_monitor_enable_hysterisis = false;
+
+	// PTW / Shadow page-table
+	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
+
+	// When true: instruction-side translation is resolved via the buddy allocator
+	// at zero latency (no ITLB/STLB/PTW cost).  When false: instructions go
+	// through the real ITLB → STLB → PTW pipeline.
+	bool itlb_oracle_translation = false;
 
 }
 
@@ -1890,6 +1896,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "enable_ddrp_monitor"))
 	{
 		knob::enable_ddrp_monitor = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "itlb_oracle_translation"))
+	{
+		knob::itlb_oracle_translation = !strcmp(value, "true") ? true : false;
 	}
 	else if (MATCH("", "ddrp_monitor_exploit_epoch"))
 	{

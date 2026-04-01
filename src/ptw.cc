@@ -7,6 +7,7 @@
 #include "uncore.h"
 #include "buddy_allocator.h"
 #include <iostream>
+#include <iomanip>
 #include <cstring>
 
 static const uint64_t CR3_STRIDE_100GB = (100ULL * 1024ULL * 1024ULL * 1024ULL);
@@ -223,7 +224,7 @@ void PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
     outstanding_walks.push_back(new_walk);
     stats.total_walks_initiated++;
 
-    l.log("PTWInitiate", hex2str(packet->address), hex2str(packet->full_addr), " instr=", packet->instr_id, '\n');
+    l.log("PTWInitiate", hex2str(packet->address), hex2str(packet->full_addr), " instr=", packet->instr_id, "ins=", +packet->instruction, '\n');
 }
 
 // Check if walk queue is available
@@ -247,14 +248,13 @@ void PTWclass::operate() {
             uint64_t pte_addr = walk.current_pa
                                 + get_level_index(walk.vaddr, curr_lvl) * sizeof(uint64_t);
 
-            walk.level_stats[curr_lvl].access_count++;
-            stats.level_stats[curr_lvl].access_count++;
-
             uint64_t pa;
             if (pwc_lookup(pte_addr, curr_lvl, pa)) {
+                walk.level_stats[curr_lvl].access_count++;
+                stats.level_stats[curr_lvl].access_count++;
                 // PwC hit: pa = next-level table base
                 l.log("PwCHit", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
-                       " pte=", hex2str(pte_addr), " -> ", hex2str(pa), " instr=", walk.instr_id , '\n');
+                       " pte=", hex2str(pte_addr), " -> ", hex2str(pa), " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
                 walk.level_stats[curr_lvl].hit_count++;
                 walk.level_stats[curr_lvl].hit_where = 0; // PwC
                 stats.level_stats[curr_lvl].hit_count++;
@@ -263,28 +263,6 @@ void PTWclass::operate() {
                 walk.current_pa = pa;    // advance to next-level table base
                 walk.current_level--;
                 continue;                // try next level in same cycle
-            }
-
-            // PwC miss: dispatch to memory via MSHR
-            walk.level_stats[curr_lvl].miss_count++;
-            stats.level_stats[curr_lvl].miss_count++;
-
-            // initalizing page tracking with all PTE set to page_fault = true.  
-            // The first walk to miss on this PTE will record the page fault in stats, 
-            // and subsequent walks will see page_fault = false and not double-count.
-            buddy_allocator.shadow_init_page(pte_addr >> LOG2_PAGE_SIZE, curr_lvl);
-
-            // Free lookup: check whether this specific PTE entry is being
-            // walked for the first time (page_fault == true).  If so, record
-            // the page fault in per-level stats 
-            {
-                uint64_t shadow_val;
-                bool is_pf;
-                if (buddy_allocator.shadow_get_entry(pte_addr, curr_lvl, shadow_val, is_pf) && is_pf) {
-                    walk.level_stats[curr_lvl].page_fault = 1;
-                    stats.level_stats[curr_lvl].page_faults++;
-                    stats.total_page_faults++;
-                }
             }
 
             int mshr_idx = find_free_mshr();
@@ -314,6 +292,7 @@ void PTWclass::operate() {
                 memset(&req, 0, sizeof(req));
                 req.address      = pte_addr >> LOG2_BLOCK_SIZE;
                 req.full_addr    = pte_addr;
+                req.virt_addr    = walk.vaddr;
                 req.cpu          = cpu;
                 req.is_data      = 1;
                 req.type         = TRANSLATION;
@@ -348,14 +327,40 @@ void PTWclass::operate() {
 
             l.log("PTWDisp", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
                    " pte=", hex2str(pte_addr), " piggyback=", already_in_flight,
-                   " instr=", walk.instr_id, '\n');
+                   " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
             dispatched = true;
+
+            // PwC miss: dispatch to memory via MSHR
+            walk.level_stats[curr_lvl].miss_count++;
+            stats.level_stats[curr_lvl].miss_count++;
+
+            walk.level_stats[curr_lvl].access_count++;
+            stats.level_stats[curr_lvl].access_count++;
+
+            // initalizing page tracking with all PTE set to page_fault = true.  
+            // The first walk to miss on this PTE will record the page fault in stats, 
+            // and subsequent walks will see page_fault = false and not double-count.
+            buddy_allocator.shadow_init_page(pte_addr >> LOG2_PAGE_SIZE, curr_lvl);
+
+            // Free lookup: check whether this specific PTE entry is being
+            // walked for the first time (page_fault == true).  If so, record
+            // the page fault in per-level stats 
+            {
+                uint64_t shadow_val;
+                bool is_pf;
+                if (buddy_allocator.shadow_get_entry(pte_addr, curr_lvl, shadow_val, is_pf) && is_pf) {
+                    walk.level_stats[curr_lvl].page_fault = 1;
+                    stats.level_stats[curr_lvl].page_faults++;
+                    stats.total_page_faults++;
+                }
+            }
+            
             break; // walk is now in MSHR; remove from outstanding
         }
 
         // If all levels resolved via PwC (no memory needed), complete immediately
         if (!dispatched && walk.current_level < 0) {
-            l.log("PTWComplete_PwC", hex2str(walk.vaddr), hex2str(walk.current_pa), " instr=", walk.instr_id, '\n');
+            l.log("PTWComplete_PwC", hex2str(walk.vaddr), hex2str(walk.current_pa), " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
             complete_page_walk(walk.packet, walk.current_pa);
             stats.walks_completed++;
             uint64_t latency = current_core_cycle[cpu] - walk.requested_cycle;
@@ -390,13 +395,14 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     // Track where the data came from
     uint8_t hit_src = 0;
     if      (packet->hit_where == hit_where_t::L1D) { hit_src = 1; stats.level_stats[lvl].l1d_hits++; }
-    else if (packet->hit_where == hit_where_t::L2C) { hit_src = 2; stats.level_stats[lvl].l2c_hits++; }
-    else if (packet->hit_where == hit_where_t::LLC) { hit_src = 3; stats.level_stats[lvl].llc_hits++; }
-    else if (packet->hit_where == hit_where_t::DRAM){ hit_src = 4; stats.level_stats[lvl].dram_hits++;}
+    else if (packet->hit_where == hit_where_t::L1I) { hit_src = 2; stats.level_stats[lvl].l1i_hits++; }
+    else if (packet->hit_where == hit_where_t::L2C) { hit_src = 3; stats.level_stats[lvl].l2c_hits++; }
+    else if (packet->hit_where == hit_where_t::LLC) { hit_src = 4; stats.level_stats[lvl].llc_hits++; }
+    else if (packet->hit_where == hit_where_t::DRAM){ hit_src = 5; stats.level_stats[lvl].dram_hits++;}
     me->level_stats[lvl].hit_where = hit_src;
 
     l.log("PTWResp", " lvl=", lvl, " vaddr=", hex2str(me->vaddr),
-           " pte=", hex2str(me->current_pa), " -> ", hex2str(next_level_base), " instr=", me->instr_id, '\n');
+           " pte=", hex2str(me->current_pa), " -> ", hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
 
     // Insert into PwC: key = PTE byte address, value = next-level table base
     pwc_insert(me->current_pa, next_level_base, lvl);
@@ -419,7 +425,7 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     } 
     else {
         // All levels done: complete the walk
-        l.log("PTWComplete", hex2str(me->vaddr), hex2str(next_level_base), " instr=", me->instr_id, '\n');
+        l.log("PTWComplete", hex2str(me->vaddr), hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
         complete_page_walk(me->packet, next_level_base);
         stats.walks_completed++;
         uint64_t latency = current_core_cycle[cpu] - me->requested_cycle;
@@ -482,91 +488,55 @@ int PTWclass::find_free_mshr() {
 
 // Print configuration
 void PTWclass::print_config() {
-    cout << "=== PTW Configuration ===" << endl;
-    cout << "CPU: " << cpu << endl;
-    cout << "PTW Latency: " << PTW_LATENCY << " cycles" << endl;
-    cout << "Max Outstanding Walks: " << MAX_OUTSTANDING_WALKS << endl;
-    cout << endl << "Page Walk Cache (PwC) Configuration:" << endl;
-    cout << "Level 4 (PML4): " << PWC_L4_SETS << " sets x " << PWC_L4_WAYS << " ways" << endl;
-    cout << "Level 3 (PDPT): " << PWC_L3_SETS << " sets x " << PWC_L3_WAYS << " ways" << endl;
-    cout << "Level 2 (PD):   " << PWC_L2_SETS << " sets x " << PWC_L2_WAYS << " ways" << endl;
-    cout << "Level 1 (PT):   " << PWC_L1_SETS << " sets x " << PWC_L1_WAYS << " ways" << endl;
-    cout << endl;
 }
 
 // Print statistics
 void PTWclass::print_stats() {
-    cout << "=== PTW Statistics (CPU " << cpu << ") ===" << endl;
-    cout << "Total Page Walks Initiated: " << stats.total_walks_initiated << endl;
-    cout << "Walks Completed: " << stats.walks_completed << endl;
-    cout << "Walks Stalled: " << stats.walks_stalled << endl;
-    cout << "Average Walk Latency: ";
-    if (stats.walks_completed > 0) {
-        cout << (float)stats.total_latency / stats.walks_completed << " cycles" << endl;
-    } else {
-        cout << "0 cycles" << endl;
-    }
-    cout << "Max Walk Latency: " << stats.max_latency << " cycles" << endl;
-    cout << endl << "Page Walk Cache Statistics:" << endl;
-    
-    cout << "Level 4 (PML4): " << level_caches[0].hits << " hits, " 
-         << level_caches[0].misses << " misses";
-    if ((level_caches[0].hits + level_caches[0].misses) > 0) {
-        cout << " (Hit Rate: " << (float)level_caches[0].hits / (level_caches[0].hits + level_caches[0].misses) * 100.0 << "%)";
-    }
-    cout << endl;
-    
-    cout << "Level 3 (PDPT): " << level_caches[1].hits << " hits, " 
-         << level_caches[1].misses << " misses";
-    if ((level_caches[1].hits + level_caches[1].misses) > 0) {
-        cout << " (Hit Rate: " << (float)level_caches[1].hits / (level_caches[1].hits + level_caches[1].misses) * 100.0 << "%)";
-    }
-    cout << endl;
-    
-    cout << "Level 2 (PD):   " << level_caches[2].hits << " hits, " 
-         << level_caches[2].misses << " misses";
-    if ((level_caches[2].hits + level_caches[2].misses) > 0) {
-        cout << " (Hit Rate: " << (float)level_caches[2].hits / (level_caches[2].hits + level_caches[2].misses) * 100.0 << "%)";
-    }
-    cout << endl;
-    
-    cout << "Level 1 (PT):   " << level_caches[3].hits << " hits, " 
-         << level_caches[3].misses << " misses";
-    if ((level_caches[3].hits + level_caches[3].misses) > 0) {
-        cout << " (Hit Rate: " << (float)level_caches[3].hits / (level_caches[3].hits + level_caches[3].misses) * 100.0 << "%)";
-    }
-    cout << endl;
-    
-    cout << endl << "Total PwC Replacements: "
-         << (level_caches[0].replacements + level_caches[1].replacements + 
-             level_caches[2].replacements + level_caches[3].replacements) << endl;
-    cout << endl;
-
-    // CSV output
-    cout << "\n=== PTW Statistics CSV (CPU " << cpu << ") ===" << endl;
     auto printScalar = [&](const string &name, uint64_t value) {
-        cout << name << "," << value << "\n";
+        cout << "PTW," << cpu << "," << name << "," << value << "\n";
     };
-    printScalar("total_walks_initiated", stats.total_walks_initiated);
-    printScalar("walks_completed", stats.walks_completed);
-    printScalar("walks_stalled", stats.walks_stalled);
-    printScalar("total_latency", stats.total_latency);
-    printScalar("max_latency", stats.max_latency);
-    printScalar("total_page_faults", stats.total_page_faults);
+    auto printFloat = [&](const string &name, double value) {
+        cout << "PTW," << cpu << "," << name << "," << fixed << setprecision(2) << value << "\n";
+    };
 
-    vector<string> names = {"PwC","L1D","L2C","LLC","DRAM"};
+    printScalar("total_walks_initiated", stats.total_walks_initiated);
+    printScalar("walks_completed",       stats.walks_completed);
+    printScalar("walks_stalled",         stats.walks_stalled);
+    printScalar("total_latency",         stats.total_latency);
+    printScalar("max_latency",           stats.max_latency);
+    printScalar("total_page_faults",     stats.total_page_faults);
+
+    const char *lvl_names[] = {"PML4", "PDPT", "PD", "PT"};
     for (uint32_t lvl = 0; lvl < PWC_TOTAL_LEVELS; lvl++) {
-        cout << "level" << lvl << "_hit_locations,";
-        for (size_t i = 0; i < names.size(); i++) {
-            cout << names[i];
-            if (i+1 < names.size()) cout << ";";
-        }
-        cout << "\n";
-        cout << "level" << lvl << "_hit_counts,";
-        cout << stats.level_stats[lvl].pwc_hits << ",";
-        cout << stats.level_stats[lvl].l1d_hits << ",";
-        cout << stats.level_stats[lvl].l2c_hits << ",";
-        cout << stats.level_stats[lvl].llc_hits << ",";
-        cout << stats.level_stats[lvl].dram_hits << "\n";
+        string pfx = string("level") + lvl_names[PWC_TOTAL_LEVELS - 1 - lvl] + "_";
+
+        uint64_t accesses = stats.level_stats[lvl].access_count;
+        uint64_t pwc_hits = stats.level_stats[lvl].pwc_hits;
+        uint64_t misses   = stats.level_stats[lvl].miss_count;
+        uint64_t pf       = stats.level_stats[lvl].page_faults;
+
+        printScalar(pfx + "accesses",    accesses);
+        printScalar(pfx + "pwc_hits",    pwc_hits);
+        printScalar(pfx + "misses",      misses);
+        printScalar(pfx + "page_faults", pf);
+
+        // PwC hit rate (%) over all accesses at this level
+        double pwc_hit_rate = (accesses > 0) ? (100.0 * pwc_hits / accesses) : 0.0;
+        printFloat(pfx + "pwc_hit_rate_pct", pwc_hit_rate);
+
+        // page-fault rate (%) over misses that went to memory
+        double pf_rate = (misses > 0) ? (100.0 * pf / misses) : 0.0;
+        printFloat(pfx + "page_fault_rate_pct", pf_rate);
+
+        // Single-row hits: PTW,<cpu>,level<LVL>_hits,pwc,l1d,l1i,l2c,llc,dram
+        cout << "PTW," << cpu << "," << pfx << "hits, pwc, l1d, l1i, l2c, llc, dram\n";
+        cout << "PTW," << cpu << "," << pfx << "hits"
+             << "," << pwc_hits
+             << "," << stats.level_stats[lvl].l1d_hits
+             << "," << stats.level_stats[lvl].l1i_hits
+             << "," << stats.level_stats[lvl].l2c_hits
+             << "," << stats.level_stats[lvl].llc_hits
+             << "," << stats.level_stats[lvl].dram_hits
+             << "\n";
     }
 }

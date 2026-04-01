@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include "ooo_cpu.h"
 #include "set.h"
+#include "logging.h"
+#include "buddy_allocator.h"
 
 #if 0
 #       define LOCKED(...) {fflush(stdout); __VA_ARGS__; fflush(stdout);}
@@ -29,6 +31,7 @@ namespace knob
     extern uint32_t ddrp_req_latency;
     extern bool enable_ddrp_monitor;
     extern bool     enable_offchip_tracing;
+    extern int itlb_oracle_translation;
 }
 
 void O3_CPU::initialize_core()
@@ -564,15 +567,31 @@ uint32_t O3_CPU::add_to_ifetch_buffer(ooo_model_instr *arch_instr)
   IFETCH_BUFFER.entry[index] = *arch_instr;
   IFETCH_BUFFER.entry[index].event_cycle = current_core_cycle[cpu];
 
-  // magically translate instructions
-  uint64_t instr_pa = va_to_pa(cpu, IFETCH_BUFFER.entry[index].instr_id, IFETCH_BUFFER.entry[index].ip , (IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE, 1);
-  instr_pa >>= LOG2_PAGE_SIZE;
-  instr_pa <<= LOG2_PAGE_SIZE;
-  instr_pa |= (IFETCH_BUFFER.entry[index].ip & ((1 << LOG2_PAGE_SIZE) - 1));  
-  IFETCH_BUFFER.entry[index].instruction_pa = instr_pa;
-  IFETCH_BUFFER.entry[index].translated = COMPLETED;
-  IFETCH_BUFFER.entry[index].fetched = 0;
-  // end magic
+  // Pravesh
+  if (knob::itlb_oracle_translation) {
+    // Oracle mode: resolve instruction-side translation instantly via the buddy
+    // allocator (same physical-page map used by the DRAM fast-path) at zero cost.
+    // No ITLB/STLB/PTW access is modelled for instruction fetches.
+    uint64_t vpage = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
+    uint64_t pframe_addr = buddy_allocator.get_pframe_addr(vpage);
+    if (pframe_addr == 0) {
+      // Page not yet mapped — allocate a physical frame via the buddy allocator.
+      pframe_addr = buddy_allocator.access();
+    }
+
+    buddy_allocator.map_vpage_to_pframe(vpage, pframe_addr >> LOG2_PAGE_SIZE);
+    uint64_t page_offset = IFETCH_BUFFER.entry[index].ip & ((1ULL << LOG2_PAGE_SIZE) - 1);
+    IFETCH_BUFFER.entry[index].instruction_pa = pframe_addr | page_offset;
+    IFETCH_BUFFER.entry[index].translated = COMPLETED;
+    IFETCH_BUFFER.entry[index].fetched = 0;
+  } else {
+    // Real ITLB path: leave translated=0 so the fetch loop sends this to ITLB.
+    // complete_instr_fetch() will set translated=COMPLETED and fill instruction_pa
+    // once the ITLB (→ STLB → PTW) responds.
+    IFETCH_BUFFER.entry[index].instruction_pa = 0;
+    IFETCH_BUFFER.entry[index].translated = 0;
+    IFETCH_BUFFER.entry[index].fetched = 0;
+  }
   
   IFETCH_BUFFER.occupancy++;
   IFETCH_BUFFER.tail++;
@@ -743,6 +762,7 @@ void O3_CPU::fetch_instruction()
             fetch_packet.asid[0] = 0;
             fetch_packet.asid[1] = 0;
             fetch_packet.event_cycle = current_core_cycle[cpu];
+            fetch_packet.fetch_packet = 1;
 
             /*
             // invoke code prefetcher -- THIS HAS BEEN MOVED TO cache.cc !!!

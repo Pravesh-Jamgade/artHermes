@@ -198,7 +198,6 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         // address of the next-level page table (or physical frame for the leaf level).
         // Derive it from the PTE's byte address: the page that contains this PTE is
         // allocated by the buddy allocator, so use its physical frame address.
-        uint64_t page_num = queue->entry[index].full_addr >> LOG2_PAGE_SIZE;
         uint64_t LATENCY = 0;
         bool page_fault = false;
         // For a translation request, we need to check if the page table entry being accessed has a valid 
@@ -209,20 +208,25 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             if (queue->entry[index].type == TRANSLATION) 
             {
                 // check if page table has entry allocated in DRAM
-                uint64_t req_pte_addr = queue->entry[index].address;
+                uint64_t req_pte_addr = queue->entry[index].full_addr;
                 uint64_t pte_data = 0;
-                buddy_allocator.shadow_get_entry(req_pte_addr, queue->entry[index].ptw_level, pte_data, page_fault);
+                bool shd_entry_found = buddy_allocator.shadow_get_entry(req_pte_addr, queue->entry[index].ptw_level, pte_data, page_fault);
 
                 // real allocation — let buddy allocator pick any free physical page
                 if (page_fault) {
                     pte_data = buddy_allocator.access();
                     // Store into shadow and clear page_fault so future cache hits return correct value.
-                    buddy_allocator.shadow_set_entry(queue->entry[index].full_addr, 
+                    buddy_allocator.shadow_set_entry(req_pte_addr, 
                                         (uint8_t)queue->entry[index].ptw_level, pte_data);
+                }
+
+                if(queue->entry[index].ptw_level == 0)
+                {
+                    buddy_allocator.map_vpage_to_pframe(queue->entry[index].virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
                 }
     
                 queue->entry[index].data = pte_data;
-                l.log(queue->NAME, "translation_return", hex2str(queue->entry[index].address), hex2str(queue->entry[index].full_addr), queue->entry[index].ptw_level, "data", hex2str(queue->entry[index].data), '\n');
+                l.log(queue->NAME, "translation_return", hex2str(queue->entry[index].address), hex2str(queue->entry[index].full_addr), queue->entry[index].ptw_level, "data", hex2str(queue->entry[index].data), "shd", shd_entry_found, "pf", page_fault, '\n');
             }
         }
 
@@ -492,9 +496,14 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
             if (is_pf) {
                 pte_data = buddy_allocator.access();
                 // Store into shadow and clear page_fault so future cache hits return correct value.
-                buddy_allocator.shadow_set_entry(packet->full_addr, (uint8_t)packet->ptw_level, pte_data);
+                buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data);
             }
             
+            if(packet->ptw_level == 0)
+            {
+                buddy_allocator.map_vpage_to_pframe(packet->virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
+            }
+
             // return pte value to cache hierarchy
             packet->data = pte_data;
             l.log(NAME, "fast-translation_return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), "pf", is_pf, "found_pte", found_pte, '\n');

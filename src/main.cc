@@ -77,6 +77,7 @@ namespace knob
     extern uint32_t dram_cntlr_ddrp_buffer_assoc;
     extern uint32_t dram_cntlr_ddrp_buffer_hash_type;
     extern bool     enable_ddrp_monitor;
+    extern int itlb_oracle_translation;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -111,6 +112,7 @@ void print_knobs()
         << "measure_dram_bw_epoch " << knob::measure_dram_bw_epoch << endl
         << "measure_cache_acc " << knob::measure_cache_acc << endl
         << "measure_cache_acc_epoch " << knob::measure_cache_acc_epoch << endl
+        << "itlb_oracle_translation " << knob::itlb_oracle_translation << endl
         << "l1d_perfect " << knob::l1d_perfect << endl
         << "l2c_perfect " << knob::l2c_perfect << endl
         << "llc_perfect " << knob::llc_perfect << endl
@@ -1634,7 +1636,6 @@ int main(int argc, char** argv)
         }
         // print and cleanup page table walker stats if present
         if(ooo_cpu[cpu].page_table_walker) {
-            ooo_cpu[cpu].page_table_walker->print_stats();
             delete ooo_cpu[cpu].page_table_walker;
             ooo_cpu[cpu].page_table_walker = nullptr;
         }

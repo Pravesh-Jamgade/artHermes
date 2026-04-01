@@ -139,6 +139,7 @@ public:
             uint64_t page_faults;
             uint64_t pwc_hits;
             uint64_t l1d_hits;
+            uint64_t l1i_hits;
             uint64_t l2c_hits;
             uint64_t llc_hits;
             uint64_t dram_hits;

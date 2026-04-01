@@ -66,10 +66,16 @@ struct BuddyAllocator {
     // Handles eviction (FIFO) if at capacity.
     // Returns the physical byte address of the allocated frame (0 on OOM).
     uint64_t access();
+
     // Look up the physical byte address for a previously mapped virtual page.
     uint64_t get_pframe_addr(uint64_t vpage_num) const {
         auto it = vpage_to_pframe.find(vpage_num);
         return it != vpage_to_pframe.end() ? (it->second << LOG2_PAGE_SIZE) : 0;
+    }
+
+    void map_vpage_to_pframe(uint64_t vpage_num, uint64_t pframe_num) {
+        vpage_to_pframe[vpage_num] = pframe_num;
+        pframe_to_vpage[pframe_num] = vpage_num;
     }
 
     // ---------------------------------------------------------------------------
