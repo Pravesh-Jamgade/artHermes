@@ -7,7 +7,7 @@
 #include "prefetcher.h"
 #include "defs.h"
 #include "cache_repl_base.h"
-
+#include "const.h"
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
@@ -302,6 +302,8 @@ class CACHE : public MEMORY {
     void track_stats_from_victim(uint32_t set, uint32_t way);
     hit_where_t assign_hit_where(uint8_t cache_type, uint32_t where_in_cache);
     void send_signal_to_core(uint32_t cpu, PACKET packet);
+
+    void record_offchip_event(uint32_t cpu, PACKET packet);
         
     bool search_and_add(uint64_t page);
    

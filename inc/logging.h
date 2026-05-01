@@ -120,7 +120,7 @@ class Logger {
 public:
     bool flag;
 
-    Logger(bool enabled = true) : flag(enabled) {}
+    Logger(bool enabled = false) : flag(enabled) {}
 
     // Base case: no arguments left — do nothing
     void log() {}
@@ -141,6 +141,8 @@ public:
 
 // Global instance — controlled by logging::enabled
 extern Logger l;
+extern Logger cache_logger;
+extern Logger front_end_logger;
 
 // =====================================================================
 // LOGGING MACROS - Main API

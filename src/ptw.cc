@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include "const.h"
 
 static const uint64_t CR3_STRIDE_100GB = (100ULL * 1024ULL * 1024ULL * 1024ULL);
 

@@ -915,8 +915,8 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
-            if(rq_entry.instruction)
-            cout  << "R:"<<NAME<<", addr, " << hex << rq_entry.address << ", full_addr, " << rq_entry.full_addr << ", vaddr, " << rq_entry.virt_addr << ", data, " << rq_entry.data << dec << ", ptw_level, " << rq_entry.ptw_level  << endl;
+            // if(rq_entry.instruction)
+            // cout  << "R:"<<NAME<<", addr, " << hex << rq_entry.address << ", full_addr, " << rq_entry.full_addr << ", vaddr, " << rq_entry.virt_addr << ", data, " << rq_entry.data << dec << ", ptw_level, " << rq_entry.ptw_level  << endl;
     
 
             // if (rq_entry.type == TRANSLATION)
@@ -966,14 +966,14 @@ void CACHE::handle_read()
             {
                 rq_entry.hit_where = assign_hit_where(cache_type, 0); // read hit
                 
-                // Logging: cache hit
-                if (rq_entry.type == TRANSLATION && rq_entry.instruction) {
-                    // LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
-                    l.log(NAME, "handle_read", "HIT",
-                        "addr", hex2str(rq_entry.address),
-                        "set", set,
-                        "way", way, '\n');
-                }
+                // // Logging: cache hit
+                // if (rq_entry.type == TRANSLATION && rq_entry.instruction) {
+                //     // LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
+                //     l.log(NAME, "handle_read", "HIT",
+                //         "addr", hex2str(rq_entry.address),
+                //         "set", set,
+                //         "way", way, '\n');
+                // }
 
                 if (cache_type == IS_ITLB) 
                 {
@@ -1165,6 +1165,9 @@ void CACHE::handle_read()
                             if(lower_level)
                             {
                                 lower_level->add_rq(&rq_entry);
+
+                                // pravesh
+                                record_offchip_event(read_cpu, rq_entry);
                                 
                                 // @RBERA: if this is a data load missing LLC, then:
                                 // 1. Monitor the position of the load in ROB
@@ -2368,8 +2371,8 @@ int CACHE::add_pq(PACKET *packet)
 
 void CACHE::return_data(PACKET *packet)
 {
-    if(packet->instruction)
-    cout <<NAME<<", addr, " << hex << packet->address << ", full_addr, " << packet->full_addr << ", vaddr, " << packet->virt_addr << ", data, " << packet->data << dec << ", ptw_level, " << packet->ptw_level  << endl;
+    // if(packet->instruction)
+    // cout <<NAME<<", addr, " << hex << packet->address << ", full_addr, " << packet->full_addr << ", vaddr, " << packet->virt_addr << ", data, " << packet->data << dec << ", ptw_level, " << packet->ptw_level  << endl;
     
     // l.log(NAME, "return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), '\n');
 
@@ -2656,15 +2659,17 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
 
     if(cache_type == IS_ITLB)
     {
-        // TODO: can ITLB have RQ/WQ hits too?
-        if(where_in_cache == 0)         return hit_where_t::ITLB;
-        else if(where_in_cache == 3)    return hit_where_t::ITLB_MSHR;
+        // // TODO: can ITLB have RQ/WQ hits too?
+        // if(where_in_cache == 0)         return hit_where_t::ITLB;
+        // else if(where_in_cache == 3)    return hit_where_t::ITLB_MSHR;
+        return hit_where_t::ITLB;
     }
     else if(cache_type == IS_DTLB)
     {
-        // TODO: can DTLB have RQ/WQ hits too?
-        if(where_in_cache == 0)         return hit_where_t::DTLB;
-        else if(where_in_cache == 3)    return hit_where_t::DTLB;
+        // // TODO: can DTLB have RQ/WQ hits too?
+        // if(where_in_cache == 0)         return hit_where_t::DTLB;
+        // else if(where_in_cache == 3)    return hit_where_t::DTLB_MSHR;
+        return hit_where_t::DTLB;
     }
     else if(cache_type == STLB)
     {
@@ -2704,6 +2709,19 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
     }
 
     return hit_where_t::INV;
+}
+
+void CACHE::record_offchip_event(uint32_t cpu, PACKET packet)
+{
+    uint32_t lq_index = packet.lq_index;
+    if(packet.type == LOAD)
+    {
+        ooo_cpu[cpu].ROB.entry[packet.rob_index].data_went_offchip = 1; // mark in ROB as well
+    }
+    else if(packet.type == TRANSLATION)
+    {
+        ooo_cpu[cpu].ROB.entry[packet.rob_index].translation_went_offchip = 1; // mark in ROB as well
+    }
 }
 
 void CACHE::send_signal_to_core(uint32_t cpu, PACKET packet)

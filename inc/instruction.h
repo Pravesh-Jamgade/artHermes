@@ -6,6 +6,7 @@
 #include <iomanip>
 #include "defs.h"
 #include "set.h"
+#include "const.h"
 
 class input_instr {
   public:
@@ -153,7 +154,20 @@ class ooo_model_instr {
 
     uint8_t mem_source_went_offchip[NUM_INSTR_SOURCES]; // RBERA: to track which memory sources went offchip
 
+    uint64_t data_fetch_finished_event_cycle,
+             translation_finished_event_cycle;
+
+    int translation_went_offchip=0;
+    int data_went_offchip=0;
+
+    bool translation_hit_tlb = 0;
+    hit_where_t data_hit_where;
+
     ooo_model_instr() {
+
+        data_fetch_finished_event_cycle = UINT64_MAX;
+        translation_finished_event_cycle = UINT64_MAX;
+
         instr_id = 0;
         ip = 0;
         fetch_producer = 0;
@@ -164,6 +178,11 @@ class ooo_model_instr {
         retired_cycle = 0;
         event_cycle = 0;
         rob_head_cycle = 0;
+
+        translation_went_offchip = 0;
+        data_went_offchip = 0;
+
+        data_hit_where = INV;
 
         is_branch = 0;
         is_memory = 0;

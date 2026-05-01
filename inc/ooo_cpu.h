@@ -11,6 +11,8 @@
 #include <bitset>
 #include <unordered_map>
 #include <vector>
+#include "hist.h"
+#include "const.h"
 
 #ifdef CRC2_COMPILE
 #define STAT_PRINTING_PERIOD 1000000
@@ -156,8 +158,15 @@ public:
             uint64_t dram_rq_full;
             uint64_t dram_mshr_full;
         } ddrp;
-
+        struct
+        {
+            uint64_t tlb_hit_data_hitwhere[hit_where_t::NumHitWheres];
+            uint64_t tlb_miss_data_hitwhere[hit_where_t::NumHitWheres];
+        } hitwhere_combinations;
     } stats;
+
+    LatencyHistogram load_to_use_hist; // histogram of load-to-use latency for loads that went offchip
+    LatencyHistogram load_to_translation_hist; // histogram of load-to-translation latency for loads that went offchip
 
     // bubble stats per ROB partiton
     vector<uint64_t> bubble_max, bubble_min, bubble_tot, bubble_cnt;
@@ -358,6 +367,7 @@ public:
   string rob_to_string();
   inline int32_t compute_rob_position(uint32_t rob_index, uint32_t rob_head) {return (rob_head <= rob_index) ? (rob_index - rob_head) : (ROB_SIZE - rob_head + rob_index);}
   void measure_pipeline_bubble_stats(uint32_t lq_index, uint32_t rob_index);
+  void measure_bubble();
   void monitor_loads(uint32_t lq_index);
   uint32_t get_rob_parition_id(int32_t rob_pos);
   bool rob_part_id_is_frontal(uint32_t rob_part_id);

@@ -200,14 +200,49 @@ void record_roi_stats(uint32_t cpu, CACHE *cache)
 
 void print_core_roi_stats(uint32_t cpu)
 {
-    // load-induced bubble stats
-    cout << "Core_" << cpu << "_bubble_called " << ooo_cpu[cpu].stats.bubble.called << endl
-         << "Core_" << cpu << "_bubble_rob_non_head " << ooo_cpu[cpu].stats.bubble.rob_non_head << endl
-         << "Core_" << cpu << "_bubble_rob_head " << ooo_cpu[cpu].stats.bubble.rob_head << endl
-         << "Core_" << cpu << "_bubble_went_offchip " << ooo_cpu[cpu].stats.bubble.went_offchip << endl
-         << "Core_" << cpu << "_bubble_went_offchip_rob_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_head << endl
-         << "Core_" << cpu << "_bubble_went_offchip_rob_non_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_non_head << endl
-         << endl;
+    ooo_cpu[cpu].load_to_use_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_load_to_use_hist").c_str());
+    ooo_cpu[cpu].load_to_translation_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_load_to_translation_hist").c_str());
+
+    cout << '\n';
+    {
+        // load-induced bubble stats
+        cout << "Core_" << cpu << "_bubble_called " << ooo_cpu[cpu].stats.bubble.called << endl
+            << "Core_" << cpu << "_bubble_rob_non_head " << ooo_cpu[cpu].stats.bubble.rob_non_head << endl
+            << "Core_" << cpu << "_bubble_rob_head " << ooo_cpu[cpu].stats.bubble.rob_head << endl
+            << "Core_" << cpu << "_bubble_went_offchip " << ooo_cpu[cpu].stats.bubble.went_offchip << endl
+            << "Core_" << cpu << "_bubble_went_offchip_rob_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_head << endl
+            << "Core_" << cpu << "_bubble_went_offchip_rob_non_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_non_head << endl
+            << endl;
+
+        // hitwhere combinations stats
+        cout << "Core_" << cpu << "_tlb_hit_data_hitwhere_combinations:" << endl;
+        for (int i = 0; i < NumHitWheres; i++) {
+            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] > 0) {
+                cout << "  " << hit_where_names[i] << ",";
+            }
+        }
+        cout << endl;
+        for (int i = 0; i < NumHitWheres; i++) {
+            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] > 0) {
+                cout << ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] << ",";
+            }
+        }
+        cout << endl;
+
+        cout << "Core_" << cpu << "_tlb_miss_data_hitwhere_combinations:" << endl;
+        for (int i = 0; i < NumHitWheres; i++) {
+            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] > 0) {
+                cout << "  " << hit_where_names[i] << "," ;
+            }
+        }
+        cout << endl;
+        for(int i = 0; i < NumHitWheres; i++) {
+            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] > 0) {
+                cout << ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] << ",";
+            }
+        }   
+        cout << endl;
+    }
     
     for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)
     {
@@ -401,6 +436,9 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         << "Core_" << cpu << "_" << cache->NAME << "_writebacks " << cache->roi_access[cpu][3] << endl
         << "Core_" << cpu << "_" << cache->NAME << "_writeback_hit " << cache->roi_hit[cpu][3] << endl
         << "Core_" << cpu << "_" << cache->NAME << "_writeback_miss " << cache->roi_miss[cpu][3] << endl
+        << "Core_" << cpu << "_" << cache->NAME << "_translations " << cache->roi_access[cpu][4] << endl
+        << "Core_" << cpu << "_" << cache->NAME << "_translations_hit " << cache->roi_hit[cpu][4] << endl
+        << "Core_" << cpu << "_" << cache->NAME << "_translations_miss " << cache->roi_miss[cpu][4] << endl
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_requested " << cache->pf_requested << endl
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_dropped " << cache->pf_dropped << endl
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_issued " << cache->pf_issued << endl
@@ -1524,6 +1562,9 @@ int main(int argc, char** argv)
                 cout << " cumulative IPC: " << ((float) ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle);
                 cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
 
+                record_roi_stats(i, &ooo_cpu[i].ITLB);
+                record_roi_stats(i, &ooo_cpu[i].DTLB);
+                record_roi_stats(i, &ooo_cpu[i].STLB);
                 record_roi_stats(i, &ooo_cpu[i].L1D);
                 record_roi_stats(i, &ooo_cpu[i].L1I);
                 record_roi_stats(i, &ooo_cpu[i].L2C);
@@ -1601,6 +1642,9 @@ int main(int argc, char** argv)
         print_core_roi_stats(i);    
 
 #ifndef CRC2_COMPILE
+        print_roi_stats(i, &ooo_cpu[i].ITLB);
+        print_roi_stats(i, &ooo_cpu[i].DTLB);
+        print_roi_stats(i, &ooo_cpu[i].STLB);
         print_roi_stats(i, &ooo_cpu[i].L1D);
         print_roi_stats(i, &ooo_cpu[i].L1I);
         print_roi_stats(i, &ooo_cpu[i].L2C);

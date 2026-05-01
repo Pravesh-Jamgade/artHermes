@@ -9,6 +9,7 @@
 #include "cache_tracer.h"
 #include "defs.h"
 #include "offchip_pred_base_helper.h"
+#include "const.h"
 
 // CACHE BLOCK
 class BLOCK {
@@ -96,36 +97,6 @@ class DRAM_ARRAY {
         block = NULL;
     };
 };
-
-typedef enum
-{
-    INV = 0,
-    ITLB,
-    ITLB_MSHR,
-    DTLB,
-    DTLB_MSHR,
-    STLB, // STLB does not have MSHR. Anything that misses STLB directly emiulates PTW
-    PTW,
-    L1I,
-    L1I_RQ,
-    L1I_WQ,
-    L1I_MSHR,
-    L1D,
-    L1D_RQ,
-    L1D_WQ,
-    L1D_MSHR,
-    L2C,
-    L2C_RQ,
-    L2C_WQ,
-    L2C_MSHR,
-    LLC,
-    LLC_RQ,
-    LLC_WQ,
-    LLC_MSHR,
-    DRAM,
-
-    NumHitWheres
-} hit_where_t;
 
 // message packet
 class PACKET {
@@ -591,6 +562,9 @@ class LSQ_ENTRY {
     
     // forwarding_depend_on_me[ROB_SIZE];
     fastset forwarding_depend_on_me;
+    
+    int translation_went_offchip=0;
+    int data_went_offchip=0;
     
     uint8_t went_offchip; // 1 => this request went to DRAM
     uint8_t went_offchip_pred; // predicted to go off-chip

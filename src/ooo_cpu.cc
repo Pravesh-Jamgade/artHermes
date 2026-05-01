@@ -220,6 +220,17 @@ void O3_CPU::read_from_trace()
 		                continue_reading = 0;
                 }
                 instr_unique_id++;
+
+                front_end_logger.log("read_from_trace", "core", cpu,
+                    "instr_id", arch_instr.instr_id,
+                    "ip", hex2str(arch_instr.ip),
+                    "is_branch", +arch_instr.is_branch,
+                    "branch_taken", +arch_instr.branch_taken,
+                    "num_reg_ops", arch_instr.num_reg_ops,
+                    "num_mem_ops", arch_instr.num_mem_ops,
+                    "num_mem_src", arch_instr.num_mem_src,
+                    "num_mem_dest", arch_instr.num_mem_dest,
+                    "cur_cycle", current_core_cycle[cpu], '\n');
             }
         }
 	    else // not a cloudsuite trace
@@ -2170,6 +2181,7 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
 
             handle_merged_translation(&queue->entry[index]);
+            ROB.entry[rob_index].translation_hit_tlb = queue->entry[index].hit_where != hit_where_t::PTW ? 1 : 0;
         }
         else 
         { 
@@ -2201,6 +2213,9 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
 
             handle_merged_translation(&queue->entry[index]);
+
+            ROB.entry[rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
+            ROB.entry[rob_index].translation_hit_tlb = queue->entry[index].hit_where != hit_where_t::PTW ? 1 : 0;
         }
 
         ROB.entry[rob_index].event_cycle = queue->entry[index].event_cycle;
@@ -2252,6 +2267,19 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
             release_load_queue(lq_index);
             handle_merged_load(&queue->entry[index]);
+
+            ROB.entry[rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
+            ROB.entry[rob_index].data_hit_where = queue->entry[index].hit_where;
+            
+            // Record TLB hit/miss + data hitwhere combinations
+            {
+                bool tlb_hit = ROB.entry[rob_index].translation_hit_tlb == 1;
+                if (tlb_hit) {
+                    stats.hitwhere_combinations.tlb_hit_data_hitwhere[static_cast<uint32_t>(ROB.entry[rob_index].data_hit_where)]++;
+                } else {
+                    stats.hitwhere_combinations.tlb_miss_data_hitwhere[static_cast<uint32_t>(ROB.entry[rob_index].data_hit_where)]++;
+                }
+            }
         }
     }
 
@@ -2460,6 +2488,11 @@ void O3_CPU::retire_rob()
         DP ( if (warmup_complete[cpu]) {
         cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[ROB.head].instr_id << " is retired" << endl; });
 
+        if(ROB.entry[ROB.head].translation_went_offchip || ROB.entry[ROB.head].data_went_offchip)
+        {
+            measure_bubble();
+        }
+
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;
 	
@@ -2551,6 +2584,36 @@ string O3_CPU::rob_to_string()
     }
 
     return ss.str();
+}
+
+// data, trans was 0 for a some load here, data bubble should not be zero (it can be if rob_head stall later while load already fetched data and waiting for completion)
+// Same for transaltion, WARNING: we might not get sufficicent gain for this reason
+void O3_CPU::measure_bubble()
+{
+   ooo_model_instr *entry = &ROB.entry[ROB.head];
+   if(entry->rob_head_cycle == 0) return; // if rob_head_cycle is 0, it means this instruction did not block the ROB, so we do not count any bubble for it
+
+   int64_t t_bubble = 0;
+   if (entry->translation_finished_event_cycle != UINT64_MAX) {
+       t_bubble = (int64_t)entry->translation_finished_event_cycle - (int64_t)entry->rob_head_cycle;
+   }
+   if(t_bubble < 0) {
+    t_bubble = 0;
+   }
+
+   load_to_translation_hist.update(t_bubble);
+
+   int64_t d_bubble = 0;
+   if (entry->data_fetch_finished_event_cycle != UINT64_MAX && entry->translation_finished_event_cycle != UINT64_MAX) {
+       d_bubble = (int64_t)entry->data_fetch_finished_event_cycle - (int64_t)entry->translation_finished_event_cycle;
+   }
+   if(d_bubble < 0){
+    d_bubble = 0;
+   }
+
+   load_to_use_hist.update(d_bubble);
+
+//    cout << "[Bubble] head, " << entry->rob_head_cycle << ", trans, " << t_bubble << ", data, " << d_bubble << '\n';
 }
 
 void O3_CPU::measure_pipeline_bubble_stats(uint32_t lq_index, uint32_t rob_index)
