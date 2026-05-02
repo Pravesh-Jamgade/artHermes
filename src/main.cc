@@ -916,11 +916,6 @@ void print_deadlock(uint32_t i)
     assert(0);
 } 
 
-void signal_handler(int signal) 
-{
-	cout << "Caught signal: " << signal << endl;
-	exit(1);
-}
 
 // log base 2 function from efectiu
 int lg2(int n)
@@ -1150,6 +1145,25 @@ void cpu_l1i_prefetcher_cache_operate(uint32_t cpu_num, uint64_t v_addr, uint8_t
 void cpu_l1i_prefetcher_cache_fill(uint32_t cpu_num, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr)
 {
   ooo_cpu[cpu_num].l1i_prefetcher_cache_fill(addr, set, way, prefetch, evicted_addr);
+}
+
+void signal_handler(int signal)
+{
+    for(int i=0; i< NUM_CPUS; i++)
+    {
+        print_deadlock(i);
+    }
+}
+void register_signal(int signal)
+{
+  struct sigaction sa;
+  sa.sa_handler = signal_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  if (sigaction(signal, &sa, NULL) == -1) {
+    perror("sigaction");
+    std::exit(EXIT_FAILURE);
+  }
 }
 
 int main(int argc, char** argv)
@@ -1451,8 +1465,8 @@ int main(int argc, char** argv)
             // proceed one cycle
             current_core_cycle[i]++;
 
-            //cout << "Trying to process instr_id: " << ooo_cpu[i].instr_unique_id << " fetch_stall: " << +ooo_cpu[i].fetch_stall;
-            //cout << " stall_cycle: " << stall_cycle[i] << " current: " << current_core_cycle[i] << endl;
+            // cout << "Trying to process instr_id: " << ooo_cpu[i].instr_unique_id << " fetch_stall: " << +ooo_cpu[i].fetch_stall;
+            // cout << " stall_cycle: " << stall_cycle[i] << " current: " << current_core_cycle[i] << endl;
 
             // core might be stalled due to page fault or branch misprediction
             if (stall_cycle[i] <= current_core_cycle[i])
