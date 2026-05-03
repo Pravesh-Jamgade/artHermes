@@ -9,6 +9,7 @@
 #include <fstream>
 #include <algorithm>
 #include <numeric>
+#include <cstdlib>
 
 #define FIXED_FLOAT(x) std::fixed << std::setprecision(5) << (x)
 // #define PRINT_AUX_STATS 1
@@ -812,9 +813,147 @@ void finish_warmup()
     uncore.LLC.LATENCY = LLC_LATENCY;
 }
 
+
+struct PacketTrackerFilter {
+    bool track_instr = false;
+    bool track_addr = false;
+    uint64_t instr_id = 0;
+    uint64_t full_addr = 0;
+
+    bool enabled() const { return track_instr || track_addr; }
+
+    bool matches(uint64_t instr, uint64_t addr) const {
+        bool instr_ok = !track_instr || (instr == instr_id);
+        bool addr_ok = !track_addr || (addr == full_addr);
+        return instr_ok && addr_ok;
+    }
+};
+
+static PacketTrackerFilter get_packet_tracker_filter()
+{
+    PacketTrackerFilter f;
+    if (const char *instr_env = std::getenv("PACKET_TRACK_INSTR_ID")) {
+        f.track_instr = true;
+        f.instr_id = std::strtoull(instr_env, nullptr, 0);
+    }
+    if (const char *addr_env = std::getenv("PACKET_TRACK_FULL_ADDR")) {
+        f.track_addr = true;
+        f.full_addr = std::strtoull(addr_env, nullptr, 0);
+    }
+    return f;
+}
+
+static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter)
+{
+    if (!filter.enabled())
+        return;
+
+    cout << "\n================ PACKET TRACKER ================\n";
+    cout << "CPU: " << cpu;
+    if (filter.track_instr)
+        cout << " instr_id=" << filter.instr_id;
+    if (filter.track_addr)
+        cout << " full_addr=0x" << hex << filter.full_addr << dec;
+    cout << endl;
+
+    for (uint32_t j = 0; j < ROB_SIZE; j++) {
+        auto &e = ooo_cpu[cpu].ROB.entry[j];
+        if (e.ip == 0)
+            continue;
+        if (!filter.matches(e.instr_id, 0))
+            continue;
+        cout << "[TRACK][ROB] idx=" << j << " instr_id=" << e.instr_id
+             << " ip=0x" << hex << e.ip << dec
+             << " translated=" << +e.translated << " fetched=" << +e.fetched
+             << " scheduled=" << +e.scheduled << " executed=" << +e.executed
+             << " event_cycle=" << e.event_cycle << endl;
+    }
+
+    for (uint32_t j = 0; j < LQ_SIZE; j++) {
+        auto &e = ooo_cpu[cpu].LQ.entry[j];
+        if (e.instr_id == 0)
+            continue;
+        if (!filter.matches(e.instr_id, e.physical_address))
+            continue;
+        cout << "[TRACK][LQ] idx=" << j << " instr_id=" << e.instr_id
+             << " paddr=0x" << hex << e.physical_address << " vaddr=0x" << e.virtual_address << dec
+             << " translated=" << +e.translated << " fetched=" << +e.fetched
+             << " event_cycle=" << e.event_cycle << endl;
+    }
+
+    for (uint32_t j = 0; j < SQ_SIZE; j++) {
+        auto &e = ooo_cpu[cpu].SQ.entry[j];
+        if (e.instr_id == 0)
+            continue;
+        if (!filter.matches(e.instr_id, e.physical_address))
+            continue;
+        cout << "[TRACK][SQ] idx=" << j << " instr_id=" << e.instr_id
+             << " paddr=0x" << hex << e.physical_address << dec
+             << " translated=" << +e.translated << " fetched=" << +e.fetched
+             << " event_cycle=" << e.event_cycle << endl;
+    }
+
+    auto print_packet_queue = [&](const string &name, PACKET_QUEUE *q) {
+        for (uint32_t j = 0; j < q->SIZE; j++) {
+            auto &pkt = q->entry[j];
+            if (pkt.cpu == NUM_CPUS)
+                continue;
+            if (!filter.matches(pkt.instr_id, pkt.full_addr))
+                continue;
+            cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
+                 << " full_addr=0x" << hex << pkt.full_addr << dec
+                 << " type=" << +pkt.type << " translated=" << +pkt.translated
+                 << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
+                 << " event_cycle=" << pkt.event_cycle << endl;
+        }
+    };
+
+    auto print_base_queue = [&](const string &name, PACKET_QUEUE_BASE *q) {
+        for (uint32_t j = 0; j < q->SIZE; j++) {
+            PACKET &pkt = q->get_entry(j);
+            if (pkt.cpu == NUM_CPUS)
+                continue;
+            if (!filter.matches(pkt.instr_id, pkt.full_addr))
+                continue;
+            cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
+                 << " full_addr=0x" << hex << pkt.full_addr << dec
+                 << " type=" << +pkt.type << " translated=" << +pkt.translated
+                 << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
+                 << " event_cycle=" << pkt.event_cycle << endl;
+        }
+    };
+
+    print_packet_queue(ooo_cpu[cpu].L1D.MSHR.NAME, &ooo_cpu[cpu].L1D.MSHR);
+    print_packet_queue(ooo_cpu[cpu].L2C.MSHR.NAME, &ooo_cpu[cpu].L2C.MSHR);
+    print_packet_queue(uncore.LLC.MSHR.NAME, &uncore.LLC.MSHR);
+
+    print_base_queue(ooo_cpu[cpu].L1D.RQ->NAME, ooo_cpu[cpu].L1D.RQ);
+    print_base_queue(ooo_cpu[cpu].L2C.RQ->NAME, ooo_cpu[cpu].L2C.RQ);
+    print_base_queue(uncore.LLC.RQ->NAME, uncore.LLC.RQ);
+
+    for (int m = 0; m < PTW_MSHR_SIZE; m++) {
+        auto &me = ooo_cpu[cpu].page_table_walker->mshr[m];
+        if (!me.valid)
+            continue;
+        if (!filter.matches(me.instr_id, me.current_pa))
+            continue;
+        cout << "[TRACK][PTW_MSHR] idx=" << m << " instr_id=" << me.instr_id
+             << " pte_addr=0x" << hex << me.current_pa << " vaddr=0x" << me.vaddr << dec
+             << " level=" << me.current_level << endl;
+    }
+}
+
 void print_deadlock(uint32_t i)
 {
-    cout << "DEADLOCK! CPU " << i << " instr_id: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].instr_id;
+    cout << "\n================ DEADLOCK SYSTEM STATE ================\n";
+    cout << "CPU: " << i << " cycle: " << current_core_cycle[i] << "\n";
+    cout << "ROB(head/tail/occ/size): " << ooo_cpu[i].ROB.head << "/" << ooo_cpu[i].ROB.tail << "/" << ooo_cpu[i].ROB.occupancy << "/" << ooo_cpu[i].ROB.SIZE << "\n";
+    cout << "LQ (head/tail/occ/size): " << ooo_cpu[i].LQ.head << "/" << ooo_cpu[i].LQ.tail << "/" << ooo_cpu[i].LQ.occupancy << "/" << ooo_cpu[i].LQ.SIZE << "\n";
+    cout << "SQ (head/tail/occ/size): " << ooo_cpu[i].SQ.head << "/" << ooo_cpu[i].SQ.tail << "/" << ooo_cpu[i].SQ.occupancy << "/" << ooo_cpu[i].SQ.SIZE << "\n";
+
+    print_packet_tracker(i, get_packet_tracker_filter());
+
+    cout << "DEADLOCK ROB head instr_id: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].instr_id;
     cout << " translated: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].translated;
     cout << " fetched: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].fetched;
     cout << " scheduled: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].scheduled;
@@ -823,16 +962,34 @@ void print_deadlock(uint32_t i)
     cout << " event: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle;
     cout << " current: " << current_core_cycle[i] << endl;
 
-    // print LQ entry
-    cout << endl << "Load Queue Entry" << endl;
-    for (uint32_t j=0; j<LQ_SIZE; j++) {
-        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << " vaddr: " << hex << ooo_cpu[i].LQ.entry[j].virtual_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[i].fetched << endl;
+    // print valid ROB entries
+    cout << "\nROB valid entries" << endl;
+    for (uint32_t j=0; j<ROB_SIZE; j++) {
+        if (ooo_cpu[i].ROB.entry[j].ip == 0)
+            continue;
+        cout << "[ROB] entry: " << j << " instr_id: " << ooo_cpu[i].ROB.entry[j].instr_id;
+        cout << " ip: " << hex << ooo_cpu[i].ROB.entry[j].ip << dec;
+        cout << " translated: " << +ooo_cpu[i].ROB.entry[j].translated;
+        cout << " fetched: " << +ooo_cpu[i].ROB.entry[j].fetched;
+        cout << " scheduled: " << +ooo_cpu[i].ROB.entry[j].scheduled;
+        cout << " executed: " << +ooo_cpu[i].ROB.entry[j].executed;
+        cout << " event_cycle: " << ooo_cpu[i].ROB.entry[j].event_cycle << endl;
     }
 
-    // print SQ entry
-    cout << endl << "Store Queue Entry" << endl;
+    // print valid LQ entries
+    cout << endl << "Load Queue valid entries" << endl;
+    for (uint32_t j=0; j<LQ_SIZE; j++) {
+        if (ooo_cpu[i].LQ.entry[j].instr_id == 0)
+            continue;
+        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << " vaddr: " << ooo_cpu[i].LQ.entry[j].virtual_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[j].fetched << endl;
+    }
+
+    // print valid SQ entries
+    cout << endl << "Store Queue valid entries" << endl;
     for (uint32_t j=0; j<SQ_SIZE; j++) {
-        cout << "[SQ] entry: " << j << " instr_id: " << ooo_cpu[i].SQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].SQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].SQ.entry[j].translated << " fetched: " << +ooo_cpu[i].SQ.entry[i].fetched << endl;
+        if (ooo_cpu[i].SQ.entry[j].instr_id == 0)
+            continue;
+        cout << "[SQ] entry: " << j << " instr_id: " << ooo_cpu[i].SQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].SQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].SQ.entry[j].translated << " fetched: " << +ooo_cpu[i].SQ.entry[j].fetched << endl;
     }
 
     // RQ
@@ -908,9 +1065,14 @@ void print_deadlock(uint32_t i)
         cout << "Walks instr_id: " << entry.instr_id << " vaddr: " << hex << entry.vaddr << dec << " walk_level: " << +entry.current_level  << endl;
     }
 
-    for(int i=0; i< PTW_MSHR_SIZE; ++i)
+    for (int m = 0; m < PTW_MSHR_SIZE; ++m)
     {
-        cout << "PTW MSHR: " << i << ", valid, " << ooo_cpu[i].page_table_walker->mshr[i].valid << std::hex << ", vaddr, " << ooo_cpu[i].page_table_walker->mshr[i].vaddr << ", paddr, " << ooo_cpu[i].page_table_walker->mshr[i].current_pa << ", " << std::dec << ooo_cpu[i].page_table_walker->mshr[i].current_level << endl;
+        auto &me = ooo_cpu[i].page_table_walker->mshr[m];
+        if (!me.valid)
+            continue;
+        cout << "PTW MSHR: " << m << ", valid, " << me.valid
+             << std::hex << ", vaddr, " << me.vaddr << ", paddr, " << me.current_pa
+             << ", " << std::dec << me.current_level << endl;
     }
     
     assert(0);
