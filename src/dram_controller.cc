@@ -226,7 +226,6 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
                 }
     
                 queue->entry[index].data = pte_data;
-                l.log(queue->NAME, "translation_return", hex2str(queue->entry[index].address), hex2str(queue->entry[index].full_addr), queue->entry[index].ptw_level, "data", hex2str(queue->entry[index].data), "shd", shd_entry_found, "pf", page_fault, '\n');
             }
         }
 
@@ -506,7 +505,6 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 
             // return pte value to cache hierarchy
             packet->data = pte_data;
-            l.log(NAME, "fast-translation_return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), "pf", is_pf, "found_pte", found_pte, '\n');
         }
 
         if (packet->instruction) 

@@ -208,10 +208,9 @@ uint32_t PTWclass::find_victim(uint32_t set, uint32_t level) {
 }
 
 // Initiate a page walk for a virtual address
-void PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
+bool PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
     if (!is_walk_queue_available()) {
-        LOG_PTW("PTW[%u]: Walk queue full, cannot initiate walk for vaddr=0x%lx", cpu, vaddr);
-        return; // Queue is full
+        return false; // Queue is full
     }
     
     OutstandingWalk new_walk;
@@ -226,6 +225,7 @@ void PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
     stats.total_walks_initiated++;
 
     l.log("PTWInitiate", hex2str(packet->address), hex2str(packet->full_addr), " instr=", packet->instr_id, "ins=", +packet->instruction, '\n');
+    return true;
 }
 
 // Check if walk queue is available
@@ -254,8 +254,6 @@ void PTWclass::operate() {
                 walk.level_stats[curr_lvl].access_count++;
                 stats.level_stats[curr_lvl].access_count++;
                 // PwC hit: pa = next-level table base
-                l.log("PwCHit", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
-                       " pte=", hex2str(pte_addr), " -> ", hex2str(pa), " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
                 walk.level_stats[curr_lvl].hit_count++;
                 walk.level_stats[curr_lvl].hit_where = 0; // PwC
                 stats.level_stats[curr_lvl].hit_count++;
@@ -325,10 +323,6 @@ void PTWclass::operate() {
             for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
                 mshr[mshr_idx].level_stats[lv] = walk.level_stats[lv];
             mshr[mshr_idx].total_page_faults = walk.total_page_faults;
-
-            l.log("PTWDisp", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
-                   " pte=", hex2str(pte_addr), " piggyback=", already_in_flight,
-                   " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
             dispatched = true;
 
             // PwC miss: dispatch to memory via MSHR
@@ -402,9 +396,6 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     else if (packet->hit_where == hit_where_t::DRAM){ hit_src = 5; stats.level_stats[lvl].dram_hits++;}
     me->level_stats[lvl].hit_where = hit_src;
 
-    l.log("PTWResp", " lvl=", lvl, " vaddr=", hex2str(me->vaddr),
-           " pte=", hex2str(me->current_pa), " -> ", hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
-
     // Insert into PwC: key = PTE byte address, value = next-level table base
     pwc_insert(me->current_pa, next_level_base, lvl);
 
@@ -426,7 +417,7 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     } 
     else {
         // All levels done: complete the walk
-        l.log("PTWComplete", hex2str(me->vaddr), hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
+        l.log("PTWComplete", hex2str(me->vaddr), "pte=", hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
         complete_page_walk(me->packet, next_level_base);
         stats.walks_completed++;
         uint64_t latency = current_core_cycle[cpu] - me->requested_cycle;

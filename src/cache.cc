@@ -915,21 +915,6 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
-            // if(rq_entry.instruction)
-            // cout  << "R:"<<NAME<<", addr, " << hex << rq_entry.address << ", full_addr, " << rq_entry.full_addr << ", vaddr, " << rq_entry.virt_addr << ", data, " << rq_entry.data << dec << ", ptw_level, " << rq_entry.ptw_level  << endl;
-    
-
-            // if (rq_entry.type == TRANSLATION)
-            // {
-            //     l.log(NAME, "handle_read", "proc",
-            //         "idx", index,
-            //         "instr_id", rq_entry.instr_id,
-            //         "addr", hex2str(rq_entry.address),
-            //         "type", rq_entry.type,
-            //         "ev", rq_entry.event_cycle,
-            //         "cur", current_core_cycle[read_cpu], '\n');
-            // }
-
             // access cache
             uint32_t set = get_set(rq_entry.address);
             int way = check_hit(&rq_entry);
@@ -965,15 +950,6 @@ void CACHE::handle_read()
             if (way >= 0) // read hit
             {
                 rq_entry.hit_where = assign_hit_where(cache_type, 0); // read hit
-                
-                // // Logging: cache hit
-                // if (rq_entry.type == TRANSLATION && rq_entry.instruction) {
-                //     // LOG_DEBUG("%s HIT T addr:0x%lx lvl:%d hw:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level, (int)rq_entry.hit_where);
-                //     l.log(NAME, "handle_read", "HIT",
-                //         "addr", hex2str(rq_entry.address),
-                //         "set", set,
-                //         "way", way, '\n');
-                // }
 
                 if (cache_type == IS_ITLB) 
                 {
@@ -1157,6 +1133,7 @@ void CACHE::handle_read()
 		                if (lower_level->get_occupancy(1, rq_entry.address) == lower_level->get_size(1, rq_entry.address))
                         {
                             miss_handled = 0;
+                            // STALL[rq_entry.type]++; ??pravesh
                         }
                         else
                         {
@@ -1197,6 +1174,7 @@ void CACHE::handle_read()
                             if (lower_level->get_occupancy(1, rq_entry.address) == lower_level->get_size(1, rq_entry.address))
                             {
                                 miss_handled = 0;
+                                // STALL[rq_entry.type]++; ??pravesh
                             }
                             else
                             {
@@ -1212,7 +1190,12 @@ void CACHE::handle_read()
                                 {
                                     // Route STLB miss to PTW (Page Table Walker) module
                                     // The PTW will perform a hierarchical page walk through 4 levels of PwC
-                                    ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
+                                    bool success = ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
+                                    if(!success){
+                                        // cannot handle miss request until one of MSHRs is available
+                                        miss_handled = 0;
+                                        // STALL[rq_entry.type]++; ?? pravesh
+                                    }
                                     // PTW will asynchronously handle the walk and call return_data
                                     // when translation is complete
                                 }

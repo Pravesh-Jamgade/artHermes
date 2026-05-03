@@ -20,6 +20,6 @@ namespace logging {
 }
 
 // Global stream-style logger — flag mirrors logging::enabled
-Logger l(false);
+Logger l(true);
 Logger cache_logger(true);
 Logger front_end_logger(true);

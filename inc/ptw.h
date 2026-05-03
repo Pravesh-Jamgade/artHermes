@@ -160,7 +160,7 @@ public:
     void initialize();
     
     // Initiate a page walk for a virtual address
-    void initiate_page_walk(PACKET *packet, uint64_t vaddr);
+    bool initiate_page_walk(PACKET *packet, uint64_t vaddr);
     
     // Lookup in PwC at a specific level
     bool pwc_lookup(uint64_t vaddr, uint32_t level, uint64_t &paddr);
