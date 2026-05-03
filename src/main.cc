@@ -814,7 +814,13 @@ void finish_warmup()
 
 void print_deadlock(uint32_t i)
 {
-    cout << "DEADLOCK! CPU " << i << " instr_id: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].instr_id;
+    cout << "\n================ DEADLOCK SYSTEM STATE ================\n";
+    cout << "CPU: " << i << " cycle: " << current_core_cycle[i] << "\n";
+    cout << "ROB(head/tail/occ/size): " << ooo_cpu[i].ROB.head << "/" << ooo_cpu[i].ROB.tail << "/" << ooo_cpu[i].ROB.occupancy << "/" << ooo_cpu[i].ROB.SIZE << "\n";
+    cout << "LQ (head/tail/occ/size): " << ooo_cpu[i].LQ.head << "/" << ooo_cpu[i].LQ.tail << "/" << ooo_cpu[i].LQ.occupancy << "/" << ooo_cpu[i].LQ.SIZE << "\n";
+    cout << "SQ (head/tail/occ/size): " << ooo_cpu[i].SQ.head << "/" << ooo_cpu[i].SQ.tail << "/" << ooo_cpu[i].SQ.occupancy << "/" << ooo_cpu[i].SQ.SIZE << "\n";
+
+    cout << "DEADLOCK ROB head instr_id: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].instr_id;
     cout << " translated: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].translated;
     cout << " fetched: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].fetched;
     cout << " scheduled: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].scheduled;
@@ -823,16 +829,34 @@ void print_deadlock(uint32_t i)
     cout << " event: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle;
     cout << " current: " << current_core_cycle[i] << endl;
 
-    // print LQ entry
-    cout << endl << "Load Queue Entry" << endl;
-    for (uint32_t j=0; j<LQ_SIZE; j++) {
-        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << " vaddr: " << hex << ooo_cpu[i].LQ.entry[j].virtual_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[i].fetched << endl;
+    // print valid ROB entries
+    cout << "\nROB valid entries" << endl;
+    for (uint32_t j=0; j<ROB_SIZE; j++) {
+        if (ooo_cpu[i].ROB.entry[j].ip == 0)
+            continue;
+        cout << "[ROB] entry: " << j << " instr_id: " << ooo_cpu[i].ROB.entry[j].instr_id;
+        cout << " ip: " << hex << ooo_cpu[i].ROB.entry[j].ip << dec;
+        cout << " translated: " << +ooo_cpu[i].ROB.entry[j].translated;
+        cout << " fetched: " << +ooo_cpu[i].ROB.entry[j].fetched;
+        cout << " scheduled: " << +ooo_cpu[i].ROB.entry[j].scheduled;
+        cout << " executed: " << +ooo_cpu[i].ROB.entry[j].executed;
+        cout << " event_cycle: " << ooo_cpu[i].ROB.entry[j].event_cycle << endl;
     }
 
-    // print SQ entry
-    cout << endl << "Store Queue Entry" << endl;
+    // print valid LQ entries
+    cout << endl << "Load Queue valid entries" << endl;
+    for (uint32_t j=0; j<LQ_SIZE; j++) {
+        if (ooo_cpu[i].LQ.entry[j].instr_id == 0)
+            continue;
+        cout << "[LQ] entry: " << j << " instr_id: " << ooo_cpu[i].LQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].LQ.entry[j].physical_address << " vaddr: " << ooo_cpu[i].LQ.entry[j].virtual_address << dec << " translated: " << +ooo_cpu[i].LQ.entry[j].translated << " fetched: " << +ooo_cpu[i].LQ.entry[j].fetched << endl;
+    }
+
+    // print valid SQ entries
+    cout << endl << "Store Queue valid entries" << endl;
     for (uint32_t j=0; j<SQ_SIZE; j++) {
-        cout << "[SQ] entry: " << j << " instr_id: " << ooo_cpu[i].SQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].SQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].SQ.entry[j].translated << " fetched: " << +ooo_cpu[i].SQ.entry[i].fetched << endl;
+        if (ooo_cpu[i].SQ.entry[j].instr_id == 0)
+            continue;
+        cout << "[SQ] entry: " << j << " instr_id: " << ooo_cpu[i].SQ.entry[j].instr_id << " address: " << hex << ooo_cpu[i].SQ.entry[j].physical_address << dec << " translated: " << +ooo_cpu[i].SQ.entry[j].translated << " fetched: " << +ooo_cpu[i].SQ.entry[j].fetched << endl;
     }
 
     // RQ
