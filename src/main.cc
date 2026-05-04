@@ -934,7 +934,7 @@ void print_deadlock(uint32_t i)
 
     for(int i=0; i< PTW_MSHR_SIZE; ++i)
     {
-        cout << "PTW MSHR: " << i << ", valid, " << ooo_cpu[i].page_table_walker->mshr[i].valid << std::hex << ", vaddr, " << ooo_cpu[i].page_table_walker->mshr[i].vaddr << ", paddr, " << ooo_cpu[i].page_table_walker->mshr[i].current_pa << ", " << std::dec << ooo_cpu[i].page_table_walker->mshr[i].current_level << endl;
+        cout << "PTW MSHR: " << i << ", valid, " << ooo_cpu[i].page_table_walker->mshr[i].valid << std::hex << ", vaddr, " << ooo_cpu[i].page_table_walker->mshr[i].vaddr << ", paddr, " << ooo_cpu[i].page_table_walker->mshr[i].current_pte_addr << ", " << std::dec << ooo_cpu[i].page_table_walker->mshr[i].current_level << endl;
     }
     
     assert(0);
