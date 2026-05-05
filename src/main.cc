@@ -1064,7 +1064,7 @@ void print_deadlock(uint32_t i)
     deque<PTWclass::OutstandingWalk> outstanding_walks = ooo_cpu[i].page_table_walker->outstanding_walks;
     for(auto entry: outstanding_walks)
     {
-        cout << "Walks instr_id: " << entry.instr_id << " vaddr: " << hex << entry.vaddr << dec << " walk_level: " << +entry.current_level  << endl;
+        cout << "Walks instr_id: " << entry.instr_id << " vaddr: " << hex << entry.virt_full_addr << dec << " walk_level: " << +entry.current_level  << endl;
     }
 
     for (int m = 0; m < PTW_MSHR_SIZE; ++m)
@@ -1073,7 +1073,7 @@ void print_deadlock(uint32_t i)
         if (!me.valid)
             continue;
         cout << "PTW MSHR: " << m << ", valid, " << me.valid
-             << std::hex << ", vaddr, " << me.vaddr << ", paddr, " << me.current_pa
+             << std::hex << ", vaddr, " << me.vaddr << ", paddr, " << me.current_pte_addr
              << ", " << std::dec << me.current_level << endl;
     }
     

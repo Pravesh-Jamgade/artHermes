@@ -220,17 +220,6 @@ void O3_CPU::read_from_trace()
 		                continue_reading = 0;
                 }
                 instr_unique_id++;
-
-                front_end_logger.log("read_from_trace", "core", cpu,
-                    "instr_id", arch_instr.instr_id,
-                    "ip", hex2str(arch_instr.ip),
-                    "is_branch", +arch_instr.is_branch,
-                    "branch_taken", +arch_instr.branch_taken,
-                    "num_reg_ops", arch_instr.num_reg_ops,
-                    "num_mem_ops", arch_instr.num_mem_ops,
-                    "num_mem_src", arch_instr.num_mem_src,
-                    "num_mem_dest", arch_instr.num_mem_dest,
-                    "cur_cycle", current_core_cycle[cpu], '\n');
             }
         }
 	    else // not a cloudsuite trace
@@ -502,6 +491,17 @@ void O3_CPU::read_from_trace()
                         continue_reading = 0;
                 }
 
+                front_end_logger.log("read_from_trace", "core", cpu,
+                    "instr_id", arch_instr.instr_id,
+                    "ip", hex2str(arch_instr.ip),
+                    "is_branch", +arch_instr.is_branch,
+                    "branch_taken", +arch_instr.branch_taken,
+                    "num_reg_ops", arch_instr.num_reg_ops,
+                    "num_mem_ops", arch_instr.num_mem_ops,
+                    "num_mem_src", arch_instr.num_mem_src,
+                    "num_mem_dest", arch_instr.num_mem_dest,
+                    "cur_cycle", current_core_cycle[cpu], '\n');
+                    
                 instr_unique_id++;
             }
         }
@@ -738,18 +738,18 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                cout << "sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
+                // cout << "sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
                 // successfully sent to the ITLB, so mark all instructions in the IFETCH_BUFFER that match this ip as translated INFLIGHT
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].translated == 0))
                     {
-                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
+                        // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = INFLIGHT;
                         IFETCH_BUFFER.entry[j].fetched = 0;
                     }
                 }
-                cout << endl;
+                // cout << endl;
 	        }
 	    }
 
@@ -778,9 +778,9 @@ void O3_CPU::fetch_instruction()
             fetch_packet.event_cycle = current_core_cycle[cpu];
             fetch_packet.fetch_packet = 1;
 
-            if(fetch_packet.address == 0x1000774){
-                cout << "fetching instruction at ip:" << hex2str(IFETCH_BUFFER.entry[index].ip) << " pa:" << hex2str(fetch_packet.address) << endl;
-            }
+            // if(fetch_packet.address == 0x1000774){
+            //     cout << "fetching instruction at ip:" << hex2str(IFETCH_BUFFER.entry[index].ip) << " pa:" << hex2str(fetch_packet.address) << endl;
+            // }
             /*
             // invoke code prefetcher -- THIS HAS BEEN MOVED TO cache.cc !!!
             int hit_way = L1I.check_hit(&fetch_packet);
@@ -796,18 +796,18 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                cout << "sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
+                // cout << "sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
                 // mark all instructions from this cache line as having been fetched
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if(((IFETCH_BUFFER.entry[j].ip)>>6) == ((IFETCH_BUFFER.entry[index].ip)>>6))
                     {
-                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
+                        // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = COMPLETED;
                         IFETCH_BUFFER.entry[j].fetched = INFLIGHT;
                     }
                 }
-                cout << '\n';
+                // cout << '\n';
 	        }
 	    }
 

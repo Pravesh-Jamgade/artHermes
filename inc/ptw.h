@@ -80,15 +80,15 @@ public:
     
     // Outstanding page walk requests (pending, not yet dispatched to memory)
     struct OutstandingWalk {
-        uint64_t vaddr;
+        uint64_t virt_full_addr;
         int      current_level;   // level to process next (3=PML4 down to 0=PT)
-        uint64_t current_pa;      // page-table base address for current_level
+        uint64_t phy_full_addr;      // page-table base address for current_level
         uint64_t requested_cycle, event_cycle;
         uint32_t instr_id;
         PACKET   packet;          // original STLB packet, copied by value
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
-        OutstandingWalk() : vaddr(0), current_level(3), current_pa(0),
+        OutstandingWalk() : virt_full_addr(0), current_level(3), phy_full_addr(0),
                             requested_cycle(0), event_cycle(0), instr_id(0), total_page_faults(0) {}
     };
 
