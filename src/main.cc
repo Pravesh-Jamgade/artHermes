@@ -216,10 +216,10 @@ void print_core_roi_stats(uint32_t cpu)
             << endl;
 
         // hitwhere combinations stats
-        cout << "Core_" << cpu << "_tlb_hit_data_hitwhere_combinations:" << endl;
         for (int i = 0; i < NumHitWheres; i++) {
+            cout << "Core_" << cpu << "_tlb_hit_data_hitwhere_combinations,";
             if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] > 0) {
-                cout << "  " << hit_where_names[i] << ",";
+                cout << hit_where_names[i] << ",";
             }
         }
         cout << endl;
@@ -229,11 +229,11 @@ void print_core_roi_stats(uint32_t cpu)
             }
         }
         cout << endl;
-
-        cout << "Core_" << cpu << "_tlb_miss_data_hitwhere_combinations:" << endl;
+        
         for (int i = 0; i < NumHitWheres; i++) {
+            cout << "Core_" << cpu << "_tlb_miss_data_hitwhere_combinations,";
             if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] > 0) {
-                cout << "  " << hit_where_names[i] << "," ;
+                cout << hit_where_names[i] << "," ;
             }
         }
         cout << endl;

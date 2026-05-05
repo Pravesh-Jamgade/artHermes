@@ -2,6 +2,7 @@
 
 use warnings;
 use Getopt::Long;
+# use lib '.'; 
 use Trace;
 use Exp;
 

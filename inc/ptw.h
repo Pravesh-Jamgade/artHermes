@@ -83,13 +83,13 @@ public:
         uint64_t vaddr;
         int      current_level;   // level to process next (3=PML4 down to 0=PT)
         uint64_t current_pa;      // page-table base address for current_level
-        uint64_t requested_cycle;
+        uint64_t requested_cycle, event_cycle;
         uint32_t instr_id;
         PACKET   packet;          // original STLB packet, copied by value
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
         OutstandingWalk() : vaddr(0), current_level(3), current_pa(0),
-                            requested_cycle(0), instr_id(0), total_page_faults(0) {}
+                            requested_cycle(0), event_cycle(0), instr_id(0), total_page_faults(0) {}
     };
 
     // MSHR entry for in-flight page table memory requests
@@ -100,7 +100,7 @@ public:
                                  // primary entry at the same (current_pa, current_level)
         uint64_t vaddr;
         int      current_level;  // level of the in-flight PTE request
-        uint64_t current_pa;     // PTE byte address sent to memory (PwC insert key)
+        uint64_t current_pte_addr;     // PTE byte address sent to memory (PwC insert key)
         uint64_t table_base_pa;  // page-table base for current_level (to re-queue walk)
         uint64_t requested_cycle;
         uint32_t instr_id;
@@ -108,7 +108,7 @@ public:
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
         PTW_MSHR_Entry() : valid(false), piggyback(false), vaddr(0), current_level(0),
-                           current_pa(0), table_base_pa(0),
+                           current_pte_addr(0), table_base_pa(0),
                            requested_cycle(0), instr_id(0), total_page_faults(0) {}
     };
 
@@ -149,7 +149,7 @@ public:
     } stats;
     
     // PTW configuration
-    uint32_t PTW_LATENCY;
+    uint32_t PTW_LATENCY,PTW_RQ_LATENCY;
     uint32_t MAX_OUTSTANDING_WALKS;
     
     // Constructor and destructor
@@ -160,7 +160,7 @@ public:
     void initialize();
     
     // Initiate a page walk for a virtual address
-    void initiate_page_walk(PACKET *packet, uint64_t vaddr);
+    bool initiate_page_walk(PACKET *packet, uint64_t vaddr);
     
     // Lookup in PwC at a specific level
     bool pwc_lookup(uint64_t vaddr, uint32_t level, uint64_t &paddr);

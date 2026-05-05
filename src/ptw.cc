@@ -20,6 +20,7 @@ PTWclass::PTWclass(uint32_t cpu_id)
     : cpu(cpu_id),
       PTW_LATENCY(100),
       MAX_OUTSTANDING_WALKS(16),
+      PTW_RQ_LATENCY(2),
       stlb_cache(NULL),
       dtlb_cache(NULL),
       itlb_cache(NULL)
@@ -208,24 +209,25 @@ uint32_t PTWclass::find_victim(uint32_t set, uint32_t level) {
 }
 
 // Initiate a page walk for a virtual address
-void PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
+bool PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
     if (!is_walk_queue_available()) {
-        LOG_PTW("PTW[%u]: Walk queue full, cannot initiate walk for vaddr=0x%lx", cpu, vaddr);
-        return; // Queue is full
+        l.log("PTWStall, vaddr", hex2str(vaddr), " instr", packet->instr_id, "ins", +packet->instruction, "current-cy", current_core_cycle[cpu], '\n');  
+        return false; // Queue is full
     }
     
     OutstandingWalk new_walk;
+    new_walk.event_cycle = current_core_cycle[cpu] + PTW_RQ_LATENCY; // for stats, not used in logic since we operate on all walks every cycle
     new_walk.vaddr = vaddr;
     new_walk.current_level = 3; // Start from L4 (PML4)
     new_walk.current_pa = cr3_base_addrs[cpu]; // initial PA is CR3 base, we will add level offsets in operate()
     new_walk.requested_cycle = current_core_cycle[cpu];
     new_walk.instr_id = packet->instr_id;
     new_walk.packet = *packet;  // copy by value — packet ptr may become stale before walk completes
-    LOG_PTW("PTW[%u]: Initiate walk for vaddr=0x%lx instr_id=%u", cpu, vaddr, packet->instr_id);
     outstanding_walks.push_back(new_walk);
     stats.total_walks_initiated++;
 
-    l.log("PTWInitiate", hex2str(packet->address), hex2str(packet->full_addr), " instr=", packet->instr_id, "ins=", +packet->instruction, '\n');
+    l.log("PTWInitiate, vaddr", hex2str(vaddr), " instr", packet->instr_id, "level", new_walk.current_level, "base_ptaddr", hex2str(new_walk.current_pa), "ins", +packet->instruction, "current-cy", current_core_cycle[cpu], '\n');
+    return true;
 }
 
 // Check if walk queue is available
@@ -248,14 +250,14 @@ void PTWclass::operate() {
             // PTE byte address = table base + level-specific index * 8
             uint64_t pte_addr = walk.current_pa
                                 + get_level_index(walk.vaddr, curr_lvl) * sizeof(uint64_t);
-
+            
             uint64_t pa;
             if (pwc_lookup(pte_addr, curr_lvl, pa)) {
+
+                l.log("PTW_PwC_Hit, vaddr", hex2str(walk.vaddr), "level", curr_lvl, "pte_addr", hex2str(pte_addr), "next_base_ptaddr", hex2str(pa), "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
                 walk.level_stats[curr_lvl].access_count++;
                 stats.level_stats[curr_lvl].access_count++;
                 // PwC hit: pa = next-level table base
-                l.log("PwCHit", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
-                       " pte=", hex2str(pte_addr), " -> ", hex2str(pa), " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
                 walk.level_stats[curr_lvl].hit_count++;
                 walk.level_stats[curr_lvl].hit_where = 0; // PwC
                 stats.level_stats[curr_lvl].hit_count++;
@@ -269,7 +271,8 @@ void PTWclass::operate() {
             int mshr_idx = find_free_mshr();
             if (mshr_idx == -1) {
                 stats.walks_stalled++;
-                break; // MSHR full, retry next cycle
+                l.log("PTW_PwC_Miss_MSHRFull, vaddr", hex2str(walk.vaddr), "level", curr_lvl, "pte_addr", hex2str(pte_addr), "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
+                return; // MSHR full, retry next cycle
             }
 
             // Check if another MSHR entry is already waiting for the same cache block
@@ -280,7 +283,7 @@ void PTWclass::operate() {
             bool already_in_flight = false;
             for (int mi = 0; mi < PTW_MSHR_SIZE; mi++) {
                 if (mshr[mi].valid && !mshr[mi].piggyback
-                    && mshr[mi].current_pa >> LOG2_BLOCK_SIZE == pte_addr >> LOG2_BLOCK_SIZE
+                    && mshr[mi].current_pte_addr >> LOG2_BLOCK_SIZE == pte_addr >> LOG2_BLOCK_SIZE
                     && mshr[mi].current_level == (int)curr_lvl) {
                     already_in_flight = true;
                     break;
@@ -308,6 +311,7 @@ void PTWclass::operate() {
                 int status = ooo_cpu[cpu].L1D.add_rq(&req);
                 if (status == -2) {
                     stats.walks_stalled++;
+                    l.log("PTW_PwC_Miss_L1DFull, vaddr", hex2str(walk.vaddr), "level", curr_lvl, "pte_addr", hex2str(pte_addr), "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
                     break; // L1D RQ full, retry next cycle
                 }
             }
@@ -317,7 +321,7 @@ void PTWclass::operate() {
             mshr[mshr_idx].piggyback       = already_in_flight;
             mshr[mshr_idx].vaddr           = walk.vaddr;
             mshr[mshr_idx].current_level   = (int)curr_lvl;
-            mshr[mshr_idx].current_pa      = pte_addr;       // PwC insert key on response
+            mshr[mshr_idx].current_pte_addr      = pte_addr;       // PwC insert key on response
             mshr[mshr_idx].table_base_pa   = walk.current_pa; // table base for re-queue
             mshr[mshr_idx].requested_cycle = walk.requested_cycle;
             mshr[mshr_idx].instr_id        = walk.instr_id;
@@ -325,11 +329,9 @@ void PTWclass::operate() {
             for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
                 mshr[mshr_idx].level_stats[lv] = walk.level_stats[lv];
             mshr[mshr_idx].total_page_faults = walk.total_page_faults;
-
-            l.log("PTWDisp", " lvl=", curr_lvl, " vaddr=", hex2str(walk.vaddr),
-                   " pte=", hex2str(pte_addr), " piggyback=", already_in_flight,
-                   " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
             dispatched = true;
+
+            l.log("PTW_PwC_Miss_Sent, vaddr", hex2str(walk.vaddr), "level", curr_lvl, "pte_addr", hex2str(pte_addr), "already_in_flight", already_in_flight, "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
 
             // PwC miss: dispatch to memory via MSHR
             walk.level_stats[curr_lvl].miss_count++;
@@ -355,19 +357,18 @@ void PTWclass::operate() {
                     stats.total_page_faults++;
                 }
             }
-            
             break; // walk is now in MSHR; remove from outstanding
         }
 
         // If all levels resolved via PwC (no memory needed), complete immediately
         if (!dispatched && walk.current_level < 0) {
-            l.log("PTWComplete_PwC", hex2str(walk.vaddr), hex2str(walk.current_pa), " instr=", walk.instr_id, "ins=", +walk.packet.instruction, '\n');
             complete_page_walk(walk.packet, walk.current_pa);
             stats.walks_completed++;
             uint64_t latency = current_core_cycle[cpu] - walk.requested_cycle;
             stats.total_latency += latency;
             if (latency > stats.max_latency) stats.max_latency = latency;
             dispatched = true; // also remove
+            l.log("PTWComplete_PwC, vaddr", hex2str(walk.vaddr),"level", walk.current_level, "pte_val", hex2str(walk.current_pa), "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
         }
 
         if (dispatched)
@@ -376,19 +377,16 @@ void PTWclass::operate() {
 
     // Remove dispatched / completed walks in reverse order to preserve indices
     for (int j = (int)to_remove.size() - 1; j >= 0; j--)
+    {
+        l.log("PTWRemoveOutstanding, vaddr", hex2str(outstanding_walks[to_remove[j]].vaddr), "level", outstanding_walks[to_remove[j]].current_level, "base_pt", hex2str(outstanding_walks[to_remove[j]].current_pa), "instr", outstanding_walks[to_remove[j]].instr_id, "ins", +outstanding_walks[to_remove[j]].packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
         outstanding_walks.erase(outstanding_walks.begin() + to_remove[j]);
+    }
 }
 
 // handle memory response for a previously issued PTE request
 void PTWclass::handle_memory_response(PACKET *packet) {
     if (packet == NULL) return;
     if (!packet->from_ptw) return;
-
-    PTW_MSHR_Entry *me = (PTW_MSHR_Entry *)packet->ptw_walk_ptr;
-    if (me == NULL || !me->valid) {
-        LOG_PTW("PTW[%u]: handle_memory_response: NULL or invalid MSHR ptr", cpu);
-        return;
-    }
 
     uint32_t lvl             = packet->ptw_level;
     uint64_t next_level_base = packet->data; // PTE value = next-level table base (or phys addr)
@@ -400,70 +398,84 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     else if (packet->hit_where == hit_where_t::L2C) { hit_src = 3; stats.level_stats[lvl].l2c_hits++; }
     else if (packet->hit_where == hit_where_t::LLC) { hit_src = 4; stats.level_stats[lvl].llc_hits++; }
     else if (packet->hit_where == hit_where_t::DRAM){ hit_src = 5; stats.level_stats[lvl].dram_hits++;}
-    me->level_stats[lvl].hit_where = hit_src;
 
-    l.log("PTWResp", " lvl=", lvl, " vaddr=", hex2str(me->vaddr),
-           " pte=", hex2str(me->current_pa), " -> ", hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
-
-    // Insert into PwC: key = PTE byte address, value = next-level table base
-    pwc_insert(me->current_pa, next_level_base, lvl);
-
-    int next_level = (int)lvl - 1;
-
-    if (next_level >= 0) {
+    if (lvl >= 0) {
+        
         // More levels to walk: push a new OutstandingWalk for the next level
-        OutstandingWalk nw;
-        nw.vaddr           = me->vaddr;
-        nw.current_level   = next_level;
-        nw.current_pa      = next_level_base; // table base for next level
-        nw.requested_cycle = me->requested_cycle;
-        nw.instr_id        = me->instr_id;
-        nw.packet          = me->packet;
-        for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
-            nw.level_stats[lv] = me->level_stats[lv];
-        nw.total_page_faults = me->total_page_faults;
-        outstanding_walks.push_back(nw);
+        for(int i = 0; i < PTW_MSHR_SIZE; i++) {
+            PTW_MSHR_Entry* me = &mshr[i];
+            if (mshr[i].current_pte_addr >> LOG2_BLOCK_SIZE != me->current_pte_addr >> LOG2_BLOCK_SIZE
+                || mshr[i].current_level != (int)lvl
+                || !mshr[i].valid)
+                continue;
+
+            me->level_stats[lvl].hit_where = hit_src;
+
+            // Insert into PwC: key = PTE byte address, value = next-level table base
+            pwc_insert(me->current_pte_addr, next_level_base, lvl);
+
+            int next_level = (int)lvl - 1;
+            
+            // request next level walk
+            if(next_level >= 0) {
+                OutstandingWalk nw;
+                nw.vaddr           = me->vaddr;
+                nw.current_level   = next_level;
+                nw.current_pa      = next_level_base; // table base for next level
+                nw.requested_cycle = me->requested_cycle;
+                nw.instr_id        = me->instr_id;
+                nw.packet          = me->packet;
+                for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
+                    nw.level_stats[lv] = me->level_stats[lv];
+                nw.total_page_faults = me->total_page_faults;
+                outstanding_walks.push_back(nw);
+                l.log("PTWNextLevel, vaddr", hex2str(me->vaddr), "level", next_level, "base_ptaddr", hex2str(next_level_base), "instr", me->instr_id, "ins", +me->packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
+            }
+            else {
+                // All levels done: complete the walk
+                l.log("PTWComplete", hex2str(me->vaddr), "pte=", hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
+                complete_page_walk(me->packet, next_level_base);
+                stats.walks_completed++;
+                uint64_t latency = current_core_cycle[cpu] - me->requested_cycle;
+                stats.total_latency += latency;
+                if (latency > stats.max_latency) stats.max_latency = latency;
+            }
+
+            // free slot
+            me->valid = false; // free MSHR slot
+        }
     } 
-    else {
-        // All levels done: complete the walk
-        l.log("PTWComplete", hex2str(me->vaddr), hex2str(next_level_base), " instr=", me->instr_id, "ins=", +me->packet.instruction, '\n');
-        complete_page_walk(me->packet, next_level_base);
-        stats.walks_completed++;
-        uint64_t latency = current_core_cycle[cpu] - me->requested_cycle;
-        stats.total_latency += latency;
-        if (latency > stats.max_latency) stats.max_latency = latency;
-    }
+    
+    // // Free the MSHR slot
+    // me->valid = false;
 
-    // Free the MSHR slot
-    me->valid = false;
+    // // Re-queue any piggyback MSHR entries that were waiting for the same
+    // // (pte cache block, level).  The PwC now has the answer, so re-queuing
+    // // them as OutstandingWalks at the same level causes an immediate PwC hit
+    // // on the next operate() cycle — no extra L1D request needed.
+    // uint64_t primary_pte_addr = me->current_pte_addr; // already freed but value is still valid
+    // for (int i = 0; i < PTW_MSHR_SIZE; i++) {
+    //     PTW_MSHR_Entry &pb = mshr[i];
+    //     if (!pb.valid || !pb.piggyback) continue;
+    //     if ((uint32_t)pb.current_level != lvl) continue;
+    //     if (pb.current_pte_addr >> LOG2_BLOCK_SIZE != primary_pte_addr >> LOG2_BLOCK_SIZE) continue;
 
-    // Re-queue any piggyback MSHR entries that were waiting for the same
-    // (pte cache block, level).  The PwC now has the answer, so re-queuing
-    // them as OutstandingWalks at the same level causes an immediate PwC hit
-    // on the next operate() cycle — no extra L1D request needed.
-    uint64_t primary_pte_addr = me->current_pa; // already freed but value is still valid
-    for (int i = 0; i < PTW_MSHR_SIZE; i++) {
-        PTW_MSHR_Entry &pb = mshr[i];
-        if (!pb.valid || !pb.piggyback) continue;
-        if ((uint32_t)pb.current_level != lvl) continue;
-        if (pb.current_pa >> LOG2_BLOCK_SIZE != primary_pte_addr >> LOG2_BLOCK_SIZE) continue;
+    //     // Re-queue at the same level with the original table base so operate()
+    //     // re-computes pte_addr and hits the PwC entry we just inserted.
+    //     OutstandingWalk nw;
+    //     nw.vaddr           = pb.vaddr;
+    //     nw.current_level   = (int)lvl;   // same level — will PwC-hit immediately
+    //     nw.current_pa      = pb.table_base_pa;
+    //     nw.requested_cycle = pb.requested_cycle;
+    //     nw.instr_id        = pb.instr_id;
+    //     nw.packet          = pb.packet;
+    //     for (uint32_t lv2 = 0; lv2 < PWC_TOTAL_LEVELS; lv2++)
+    //         nw.level_stats[lv2] = pb.level_stats[lv2];
+    //     nw.total_page_faults = pb.total_page_faults;
+    //     outstanding_walks.push_back(nw);
 
-        // Re-queue at the same level with the original table base so operate()
-        // re-computes pte_addr and hits the PwC entry we just inserted.
-        OutstandingWalk nw;
-        nw.vaddr           = pb.vaddr;
-        nw.current_level   = (int)lvl;   // same level — will PwC-hit immediately
-        nw.current_pa      = pb.table_base_pa;
-        nw.requested_cycle = pb.requested_cycle;
-        nw.instr_id        = pb.instr_id;
-        nw.packet          = pb.packet;
-        for (uint32_t lv2 = 0; lv2 < PWC_TOTAL_LEVELS; lv2++)
-            nw.level_stats[lv2] = pb.level_stats[lv2];
-        nw.total_page_faults = pb.total_page_faults;
-        outstanding_walks.push_back(nw);
-
-        pb.valid = false;
-    }
+    //     pb.valid = false;
+    // }
 }
 
 // Complete a page walk — fill result into STLB packet and return to STLB
