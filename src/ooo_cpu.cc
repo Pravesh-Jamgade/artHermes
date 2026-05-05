@@ -542,7 +542,7 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
         assert(0 && "ROB instruction pointer is null");
     }
 #endif
-    
+
     return index;
 }
 
@@ -738,15 +738,18 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
+                cout << "sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
                 // successfully sent to the ITLB, so mark all instructions in the IFETCH_BUFFER that match this ip as translated INFLIGHT
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].translated == 0))
                     {
+                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = INFLIGHT;
                         IFETCH_BUFFER.entry[j].fetched = 0;
                     }
                 }
+                cout << endl;
 	        }
 	    }
 
@@ -775,6 +778,9 @@ void O3_CPU::fetch_instruction()
             fetch_packet.event_cycle = current_core_cycle[cpu];
             fetch_packet.fetch_packet = 1;
 
+            if(fetch_packet.address == 0x1000774){
+                cout << "fetching instruction at ip:" << hex2str(IFETCH_BUFFER.entry[index].ip) << " pa:" << hex2str(fetch_packet.address) << endl;
+            }
             /*
             // invoke code prefetcher -- THIS HAS BEEN MOVED TO cache.cc !!!
             int hit_way = L1I.check_hit(&fetch_packet);
@@ -790,15 +796,18 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
+                cout << "sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
                 // mark all instructions from this cache line as having been fetched
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if(((IFETCH_BUFFER.entry[j].ip)>>6) == ((IFETCH_BUFFER.entry[index].ip)>>6))
                     {
+                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = COMPLETED;
                         IFETCH_BUFFER.entry[j].fetched = INFLIGHT;
                     }
                 }
+                cout << '\n';
 	        }
 	    }
 
@@ -1689,6 +1698,9 @@ void O3_CPU::operate_lsq()
                     RTS0_head = 0;
 
                 store_issued++;
+
+                o3_logger.log("op_lsq, ip ", hex2str(data_packet.ip), "addr", hex2str(data_packet.address), "full_addr", hex2str(data_packet.full_addr),
+                    "type", "store, cy ", current_core_cycle[cpu], '\n');
             }
         }
         else
@@ -1783,6 +1795,9 @@ void O3_CPU::operate_lsq()
                     RTL0_head = 0;
 
                 load_issued++;
+
+                 o3_logger.log("op_lsq, ip ", hex2str(data_packet.ip), "addr", hex2str(data_packet.address), "full_addr", hex2str(data_packet.full_addr),
+                    "type", "load, cy ", current_core_cycle[cpu], '\n');
             }
         }
         else 
@@ -1939,6 +1954,8 @@ int O3_CPU::execute_load(uint32_t rob_index, uint32_t lq_index, uint32_t data_in
     else 
         LQ.entry[lq_index].fetched = INFLIGHT;
 
+    o3_logger.log("op_lsq, ip ", hex2str(data_packet.ip), "addr", hex2str(data_packet.address), "full_addr", hex2str(data_packet.full_addr),
+                    "type", "load, cy ", current_core_cycle[cpu], "fl1d", +data_packet.fill_l1d, "fl1i", +data_packet.fill_l1i, '\n');
     return rq_index;
 }
 

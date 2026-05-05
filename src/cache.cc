@@ -915,10 +915,8 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
-            if(rq_entry.instr_id == 7562463)
-            {
-                cache_logger.log("handle_read", NAME, "addr", hex2str(rq_entry.address), "instr", rq_entry.instr_id, "type", +rq_entry.type, "current-cy", current_core_cycle[rq_entry.cpu], '\n');
-            }
+            
+            cache_logger.log("handle_read", NAME, "addr", hex2str(rq_entry.address), "instr", rq_entry.instr_id, "type", +rq_entry.type, "current-cy", current_core_cycle[rq_entry.cpu], '\n');
 
             // access cache
             uint32_t set = get_set(rq_entry.address);
@@ -1880,11 +1878,6 @@ int CACHE::invalidate_entry(uint64_t inval_addr)
 
 int CACHE::add_rq(PACKET *packet)
 {
-    if(packet->instr_id == 7562463)
-    {
-        cache_logger.log("add_rq", NAME, "addr", hex2str(packet->address), "instr", packet->instr_id, "type", +packet->type, "current-cy", current_core_cycle[packet->cpu], '\n');
-    }
-
     // check for the latest writebacks in the write queue
     int wq_index = WQ.check_queue(packet);
     if (wq_index != -1) 

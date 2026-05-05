@@ -143,6 +143,7 @@ public:
 extern Logger l;
 extern Logger cache_logger;
 extern Logger front_end_logger;
+extern Logger o3_logger;
 
 // =====================================================================
 // LOGGING MACROS - Main API
