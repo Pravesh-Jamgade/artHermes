@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cstdlib>
+#include "logging.h"
 
 #define FIXED_FLOAT(x) std::fixed << std::setprecision(5) << (x)
 // #define PRINT_AUX_STATS 1
@@ -815,98 +816,68 @@ void finish_warmup()
     uncore.LLC.LATENCY = LLC_LATENCY;
 }
 
-
-struct PacketTrackerFilter {
-    bool track_instr = false;
-    bool track_addr = false;
-    uint64_t instr_id = 0;
-    uint64_t full_addr = 0;
-
-    bool enabled() const { return track_instr || track_addr; }
-
-    bool matches(uint64_t instr, uint64_t addr) const {
-        bool instr_ok = !track_instr || (instr == instr_id);
-        bool addr_ok = !track_addr || (addr == full_addr);
-        return instr_ok && addr_ok;
-    }
-};
-
-static PacketTrackerFilter get_packet_tracker_filter()
-{
-    PacketTrackerFilter f;
-    if (const char *instr_env = std::getenv("PACKET_TRACK_INSTR_ID")) {
-        f.track_instr = true;
-        f.instr_id = std::strtoull(instr_env, nullptr, 0);
-    }
-    if (const char *addr_env = std::getenv("PACKET_TRACK_FULL_ADDR")) {
-        f.track_addr = true;
-        f.full_addr = std::strtoull(addr_env, nullptr, 0);
-    }
-    return f;
-}
-
 static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter)
 {
     if (!filter.enabled())
         return;
 
-    cout << "\n================ PACKET TRACKER ================\n";
-    cout << "CPU: " << cpu;
-    if (filter.track_instr)
-        cout << " instr_id=" << filter.instr_id;
-    if (filter.track_addr)
-        cout << " full_addr=0x" << hex << filter.full_addr << dec;
-    cout << endl;
+    // cout << "\n================ PACKET TRACKER ================\n";
+    // cout << "CPU: " << cpu;
+    // if (filter.track_instr)
+    //     cout << " instr_id=" << filter.instr_id;
+    // if (filter.track_addr)
+    //     cout << " full_addr=0x" << hex << filter.ip << dec;
+    // cout << endl;
 
-    for (uint32_t j = 0; j < ROB_SIZE; j++) {
-        auto &e = ooo_cpu[cpu].ROB.entry[j];
-        if (e.ip == 0)
-            continue;
-        if (!filter.matches(e.instr_id, 0))
-            continue;
-        cout << "[TRACK][ROB] idx=" << j << " instr_id=" << e.instr_id
-             << " ip=0x" << hex << e.ip << dec
-             << " translated=" << +e.translated << " fetched=" << +e.fetched
-             << " scheduled=" << +e.scheduled << " executed=" << +e.executed
-             << " event_cycle=" << e.event_cycle << endl;
-    }
+    // for (uint32_t j = 0; j < ROB_SIZE; j++) {
+    //     auto &e = ooo_cpu[cpu].ROB.entry[j];
+    //     if (e.ip == 0)
+    //         continue;
+    //     if (!filter.matches(e.instr_id, e.ip))
+    //         continue;
+    //     cout << "[TRACK][ROB] idx=" << j << " instr_id=" << e.instr_id
+    //          << " ip=0x" << hex << e.ip << dec
+    //          << " translated=" << +e.translated << " fetched=" << +e.fetched
+    //          << " scheduled=" << +e.scheduled << " executed=" << +e.executed
+    //          << " event_cycle=" << e.event_cycle << endl;
+    // }
 
-    for (uint32_t j = 0; j < LQ_SIZE; j++) {
-        auto &e = ooo_cpu[cpu].LQ.entry[j];
-        if (e.instr_id == 0)
-            continue;
-        if (!filter.matches(e.instr_id, e.physical_address))
-            continue;
-        cout << "[TRACK][LQ] idx=" << j << " instr_id=" << e.instr_id
-             << " paddr=0x" << hex << e.physical_address << " vaddr=0x" << e.virtual_address << dec
-             << " translated=" << +e.translated << " fetched=" << +e.fetched
-             << " event_cycle=" << e.event_cycle << endl;
-    }
+    // for (uint32_t j = 0; j < LQ_SIZE; j++) {
+    //     auto &e = ooo_cpu[cpu].LQ.entry[j];
+    //     if (e.instr_id == 0)
+    //         continue;
+    //     if (!filter.matches(e.instr_id, e.ip))
+    //         continue;
+    //     cout << "[TRACK][LQ] idx=" << j << " instr_id=" << e.instr_id
+    //          << " paddr=0x" << hex << e.physical_address << " vaddr=0x" << e.virtual_address << dec
+    //          << " translated=" << +e.translated << " fetched=" << +e.fetched
+    //          << " event_cycle=" << e.event_cycle << " ip=" << hex2str(e.ip) << endl;
+    // }
 
-    for (uint32_t j = 0; j < SQ_SIZE; j++) {
-        auto &e = ooo_cpu[cpu].SQ.entry[j];
-        if (e.instr_id == 0)
-            continue;
-        if (!filter.matches(e.instr_id, e.physical_address))
-            continue;
-        cout << "[TRACK][SQ] idx=" << j << " instr_id=" << e.instr_id
-             << " paddr=0x" << hex << e.physical_address << dec
-             << " translated=" << +e.translated << " fetched=" << +e.fetched
-             << " event_cycle=" << e.event_cycle << endl;
-    }
+    // for (uint32_t j = 0; j < SQ_SIZE; j++) {
+    //     auto &e = ooo_cpu[cpu].SQ.entry[j];
+    //     if (e.instr_id == 0)
+    //         continue;
+    //     if (!filter.matches(e.instr_id, e.ip))
+    //         continue;
+    //     cout << "[TRACK][SQ] idx=" << j << " instr_id=" << e.instr_id
+    //          << " paddr=0x" << hex << e.physical_address << dec
+    //          << " translated=" << +e.translated << " fetched=" << +e.fetched
+    //          << " event_cycle=" << e.event_cycle << " ip=" << hex2str(e.ip) << endl;
+    // }
 
     auto print_packet_queue = [&](const string &name, PACKET_QUEUE *q) {
         for (uint32_t j = 0; j < q->SIZE; j++) {
             auto &pkt = q->entry[j];
             if (pkt.cpu == NUM_CPUS)
                 continue;
-            if (!filter.matches(pkt.instr_id, pkt.full_addr))
+            if (!filter.matches(pkt.instr_id, pkt.ip))
                 continue;
             cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
                  << " full_addr=0x" << hex << pkt.full_addr << dec
                  << " type=" << +pkt.type << " translated=" << +pkt.translated
                  << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
-                 << " event_cycle=" << pkt.event_cycle << endl;
+                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip) << endl;
         }
     };
 
@@ -915,20 +886,29 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
             PACKET &pkt = q->get_entry(j);
             if (pkt.cpu == NUM_CPUS)
                 continue;
-            if (!filter.matches(pkt.instr_id, pkt.full_addr))
+            if (!filter.matches(pkt.instr_id, pkt.ip))
                 continue;
             cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
                  << " full_addr=0x" << hex << pkt.full_addr << dec
                  << " type=" << +pkt.type << " translated=" << +pkt.translated
                  << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
-                 << " event_cycle=" << pkt.event_cycle << endl;
+                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip) << endl;
         }
     };
 
+    print_packet_queue(ooo_cpu[cpu].DTLB.MSHR.NAME, &ooo_cpu[cpu].DTLB.MSHR);
+    print_packet_queue(ooo_cpu[cpu].ITLB.MSHR.NAME, &ooo_cpu[cpu].ITLB.MSHR);
+    print_packet_queue(ooo_cpu[cpu].STLB.MSHR.NAME, &ooo_cpu[cpu].STLB.MSHR);
+    print_packet_queue(ooo_cpu[cpu].L1I.MSHR.NAME, &ooo_cpu[cpu].L1I.MSHR);
+    print_packet_queue(ooo_cpu[cpu].L1I.PROCESSED.NAME, &ooo_cpu[cpu].L1I.PROCESSED);
     print_packet_queue(ooo_cpu[cpu].L1D.MSHR.NAME, &ooo_cpu[cpu].L1D.MSHR);
+    print_packet_queue(ooo_cpu[cpu].L1D.PROCESSED.NAME, &ooo_cpu[cpu].L1D.PROCESSED);
     print_packet_queue(ooo_cpu[cpu].L2C.MSHR.NAME, &ooo_cpu[cpu].L2C.MSHR);
     print_packet_queue(uncore.LLC.MSHR.NAME, &uncore.LLC.MSHR);
 
+    print_base_queue(ooo_cpu[cpu].DTLB.RQ->NAME, ooo_cpu[cpu].DTLB.RQ);
+    print_base_queue(ooo_cpu[cpu].ITLB.RQ->NAME, ooo_cpu[cpu].ITLB.RQ);
+    print_base_queue(ooo_cpu[cpu].STLB.RQ->NAME, ooo_cpu[cpu].STLB.RQ);
     print_base_queue(ooo_cpu[cpu].L1D.RQ->NAME, ooo_cpu[cpu].L1D.RQ);
     print_base_queue(ooo_cpu[cpu].L2C.RQ->NAME, ooo_cpu[cpu].L2C.RQ);
     print_base_queue(uncore.LLC.RQ->NAME, uncore.LLC.RQ);
@@ -937,11 +917,11 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
         auto &me = ooo_cpu[cpu].page_table_walker->mshr[m];
         if (!me.valid)
             continue;
-        if (!filter.matches(me.instr_id, me.current_pa))
+        if (!filter.matches(me.instr_id, me.packet.ip))
             continue;
         cout << "[TRACK][PTW_MSHR] idx=" << m << " instr_id=" << me.instr_id
-             << " pte_addr=0x" << hex << me.current_pa << " vaddr=0x" << me.vaddr << dec
-             << " level=" << me.current_level << endl;
+             << " pte_addr=0x" << hex << me.current_pte_addr << " vaddr=0x" << me.vaddr << dec
+             << " level=" << me.current_level << " ip=" << hex2str(me.packet.ip) << endl;
     }
 }
 
@@ -952,8 +932,6 @@ void print_deadlock(uint32_t i)
     cout << "ROB(head/tail/occ/size): " << ooo_cpu[i].ROB.head << "/" << ooo_cpu[i].ROB.tail << "/" << ooo_cpu[i].ROB.occupancy << "/" << ooo_cpu[i].ROB.SIZE << "\n";
     cout << "LQ (head/tail/occ/size): " << ooo_cpu[i].LQ.head << "/" << ooo_cpu[i].LQ.tail << "/" << ooo_cpu[i].LQ.occupancy << "/" << ooo_cpu[i].LQ.SIZE << "\n";
     cout << "SQ (head/tail/occ/size): " << ooo_cpu[i].SQ.head << "/" << ooo_cpu[i].SQ.tail << "/" << ooo_cpu[i].SQ.occupancy << "/" << ooo_cpu[i].SQ.SIZE << "\n";
-
-    print_packet_tracker(i, get_packet_tracker_filter());
 
     cout << "DEADLOCK ROB head instr_id: " << ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].instr_id;
     cout << " translated: " << +ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].translated;
@@ -1061,6 +1039,58 @@ void print_deadlock(uint32_t i)
         cout << " translated: " << +pkt.translated << " fetched: " << +pkt.fetched << " returned: " << +pkt.returned << " event_cycle: " << pkt.event_cycle << endl;
     }
 
+    // print ITLB MSHR
+    queue = &ooo_cpu[i].ITLB.MSHR;
+    cout << endl << "ITLB_MSHR Entry" << endl;
+    for (uint32_t j=0; j<queue->SIZE; j++) {
+        if (!queue->entry[j].address ) continue;
+        cout << "[ITLB_MSHR] entry: " << j << " instr_id: " << queue->entry[j].instr_id
+             << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec
+             << " type: " << +queue->entry[j].type << " fill_level: " << queue->entry[j].fill_level << endl;
+    }
+
+    // print DTLB MSHR
+    queue = &ooo_cpu[i].DTLB.MSHR;
+    cout << endl << "DTLB_MSHR Entry" << endl;
+    for (uint32_t j=0; j<queue->SIZE; j++) {
+        if (!queue->entry[j].address) continue;
+        cout << "[DTLB_MSHR] entry: " << j << " instr_id: " << queue->entry[j].instr_id
+             << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec
+             << " type: " << +queue->entry[j].type << " fill_level: " << queue->entry[j].fill_level << endl;
+    }
+
+    // print STLB MSHR
+    queue = &ooo_cpu[i].STLB.MSHR;
+    cout << endl << "STLB_MSHR Entry" << endl;
+    for (uint32_t j=0; j<queue->SIZE; j++) {
+        if (!queue->entry[j].address) continue;
+        cout << "[STLB_MSHR] entry: " << j << " instr_id: " << queue->entry[j].instr_id
+             << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec
+             << " type: " << +queue->entry[j].type << " fill_level: " << queue->entry[j].fill_level << endl;
+    }
+
+    // print L1I MSHR
+    queue = &ooo_cpu[i].L1I.MSHR;
+    cout << endl << "L1I_MSHR Entry" << endl;
+    for (uint32_t j=0; j<queue->SIZE; j++) {
+        if (!queue->entry[j].address) continue;
+        cout << "[L1I_MSHR] entry: " << j << " instr_id: " << queue->entry[j].instr_id
+             << " address: " << hex << queue->entry[j].address << " full_addr: " << queue->entry[j].full_addr << dec
+             << " type: " << +queue->entry[j].type << " fill_level: " << queue->entry[j].fill_level << endl;
+    }
+
+    // print IFETCH_BUFFER entries that are not yet fully fetched
+    cout << endl << "IFETCH_BUFFER stalled entries" << endl;
+    for (uint32_t j=0; j<ooo_cpu[i].IFETCH_BUFFER.SIZE; j++) {
+        if (ooo_cpu[i].IFETCH_BUFFER.entry[j].ip == 0) continue;
+        if (ooo_cpu[i].IFETCH_BUFFER.entry[j].fetched == COMPLETED) continue;
+        cout << "[IFETCH] entry: " << j
+             << " instr_id: " << ooo_cpu[i].IFETCH_BUFFER.entry[j].instr_id
+             << " ip: " << hex << ooo_cpu[i].IFETCH_BUFFER.entry[j].ip << dec
+             << " translated: " << +ooo_cpu[i].IFETCH_BUFFER.entry[j].translated
+             << " fetched: " << +ooo_cpu[i].IFETCH_BUFFER.entry[j].fetched << endl;
+    }
+
     deque<PTWclass::OutstandingWalk> outstanding_walks = ooo_cpu[i].page_table_walker->outstanding_walks;
     for(auto entry: outstanding_walks)
     {
@@ -1076,7 +1106,18 @@ void print_deadlock(uint32_t i)
              << std::hex << ", vaddr, " << me.vaddr << ", paddr, " << me.current_pte_addr
              << ", " << std::dec << me.current_level << endl;
     }
-    
+
+    for(int i=0; i< DRAM_CHANNELS; i++)
+    {
+        PACKET_QUEUE rq = uncore.DRAM.RQ[i];
+        for(int i=0; i< rq.SIZE; i++){
+            if(!rq.entry[i].address){
+                continue;
+            }
+            cout << "DRAM RQ: " << i << ", full_addr, " << rq.entry[i].full_addr << ", instr_id, " << rq.entry[i].instr_id
+                 << std::dec << ", type, " << +rq.entry[i].type << endl;
+        }
+    }
     assert(0);
 } 
 
@@ -1635,6 +1676,8 @@ int main(int argc, char** argv)
             // core might be stalled due to page fault or branch misprediction
             if (stall_cycle[i] <= current_core_cycle[i])
             {
+                print_packet_tracker(i, get_packet_tracker_filter());
+
                 // retire
                 if ((ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].executed == COMPLETED) && (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle <= current_core_cycle[i]))
                 {
@@ -1701,8 +1744,8 @@ int main(int argc, char** argv)
                 ooo_cpu[i].last_sim_cycle = current_core_cycle[i];
             }
 
-            // check for deadlock
-            if (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].ip && (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle + DEADLOCK_CYCLE) <= current_core_cycle[i])
+            // check for deadlock — skip if ROB is empty (occupancy==0 means head slot is stale/cleared)
+            if (ooo_cpu[i].ROB.occupancy > 0 && ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].ip && (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle + DEADLOCK_CYCLE) <= current_core_cycle[i])
             {
                 print_deadlock(i);
             }

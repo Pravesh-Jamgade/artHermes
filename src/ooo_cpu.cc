@@ -490,18 +490,7 @@ void O3_CPU::read_from_trace()
                     if ((num_reads >= instrs_to_read_this_cycle) || (IFETCH_BUFFER.occupancy == IFETCH_BUFFER.SIZE))
                         continue_reading = 0;
                 }
-
-                front_end_logger.log("read_from_trace", "core", cpu,
-                    "instr_id", arch_instr.instr_id,
-                    "ip", hex2str(arch_instr.ip),
-                    "is_branch", +arch_instr.is_branch,
-                    "branch_taken", +arch_instr.branch_taken,
-                    "num_reg_ops", arch_instr.num_reg_ops,
-                    "num_mem_ops", arch_instr.num_mem_ops,
-                    "num_mem_src", arch_instr.num_mem_src,
-                    "num_mem_dest", arch_instr.num_mem_dest,
-                    "cur_cycle", current_core_cycle[cpu], '\n');
-                    
+                   
                 instr_unique_id++;
             }
         }
@@ -733,7 +722,7 @@ void O3_CPU::fetch_instruction()
             trace_packet.asid[0] = 0;
             trace_packet.asid[1] = 0;
             trace_packet.event_cycle = current_core_cycle[cpu];
-	  
+
             int rq_index = ITLB.add_rq(&trace_packet);
 
             if(rq_index != -2)
@@ -778,9 +767,6 @@ void O3_CPU::fetch_instruction()
             fetch_packet.event_cycle = current_core_cycle[cpu];
             fetch_packet.fetch_packet = 1;
 
-            // if(fetch_packet.address == 0x1000774){
-            //     cout << "fetching instruction at ip:" << hex2str(IFETCH_BUFFER.entry[index].ip) << " pa:" << hex2str(fetch_packet.address) << endl;
-            // }
             /*
             // invoke code prefetcher -- THIS HAS BEEN MOVED TO cache.cc !!!
             int hit_way = L1I.check_hit(&fetch_packet);
@@ -2118,6 +2104,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 {
     uint32_t index = queue->head;
     uint64_t complete_ip = queue->entry[index].ip;
+    uint64_t complete_addr = queue->entry[index].address;
 
     if(is_it_tlb)
     {
@@ -2143,7 +2130,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 	    // this is the L1I cache, so instructions are now fully fetched, so mark them as such
 	    for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
 	    {
-	        if(((IFETCH_BUFFER.entry[j].ip)>>6) == ((complete_ip)>>6))
+	        if(((IFETCH_BUFFER.entry[j].instruction_pa)>>6) == complete_addr)
 	        {
 		        IFETCH_BUFFER.entry[j].translated = COMPLETED;
 		        IFETCH_BUFFER.entry[j].fetched = COMPLETED;

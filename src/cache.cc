@@ -495,12 +495,6 @@ void CACHE::handle_fill()
                 total_miss_latency += current_miss_latency;
 	        }
 	  
-            // Logging: MSHR remove
-            if (MSHR.entry[mshr_index].type == TRANSLATION) {
-                LOG_DEBUG("%s MSHR_REM T addr:0x%lx lvl:%d", NAME.c_str(), MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].fill_level);
-            } else {
-                LOG_DEBUG("%s MSHR_REM addr:0x%lx typ:%d", NAME.c_str(), MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].type);
-            }
             MSHR.remove_queue(&MSHR.entry[mshr_index]);
             MSHR.num_returned--;
 
@@ -915,7 +909,6 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
-            
             cache_logger.log("handle_read", NAME, "addr", hex2str(rq_entry.address), "instr", rq_entry.instr_id, "type", +rq_entry.type, "current-cy", current_core_cycle[rq_entry.cpu], '\n');
 
             // access cache
@@ -1103,16 +1096,6 @@ void CACHE::handle_read()
             }
             else // read miss
             {
-                // Logging: cache miss
-                if (rq_entry.type == TRANSLATION) {
-                    // LOG_DEBUG("%s MISS T addr:0x%lx lvl:%d", NAME.c_str(), rq_entry.address, rq_entry.fill_level);
-                    // l.log(NAME, "handle_read", "MISS",
-                    //     "addr", hex2str(rq_entry.address),
-                    //     "set", set, '\n');
-                } else {
-                    LOG_DEBUG("%s MISS addr:0x%lx typ:%d", NAME.c_str(), rq_entry.address, rq_entry.type);
-                }
-                
                 DP ( if (warmup_complete[read_cpu]) {
                 cout << "[" << NAME << "] " << __func__ << " read miss";
                 cout << " instr_id: " << rq_entry.instr_id << " address: " << hex << rq_entry.address;
@@ -1169,8 +1152,23 @@ void CACHE::handle_read()
 		            }
                     else
                     {
+                        // STLB+PTW: initiate walk BEFORE allocating MSHR to prevent orphaned entries.
+                        // If PTW queue is full and we allocated MSHR first, on retry the MSHR hit path
+                        // would merge the packet without re-triggering PTW, leaving the MSHR stuck.
+                        if (cache_type == IS_STLB && !lower_level &&
+                            knob::enable_ptw && ooo_cpu[read_cpu].page_table_walker != NULL)
+                        {
+                            bool success = ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
+                            if (success) {
+                                add_mshr(&rq_entry);
+                            } else {
+                                miss_handled = 0;
+                            }
+                        }
+                        else
+                        {
                         // add it to mshr (read miss)
-                        add_mshr(&rq_entry);                    
+                        add_mshr(&rq_entry);
                         // add it to the next level's read queue
                         if (lower_level)
                         {
@@ -1183,36 +1181,20 @@ void CACHE::handle_read()
                             {
                                 lower_level->add_rq(&rq_entry);
                             }
-                            
+
                         }
-                        else // this is the last level
+                        else // this is the last level (STLB with PTW disabled or fallback)
                         {
                             if (cache_type == IS_STLB)
                             {
-                                if (knob::enable_ptw && ooo_cpu[read_cpu].page_table_walker != NULL)
-                                {
-                                    // Route STLB miss to PTW (Page Table Walker) module
-                                    // The PTW will perform a hierarchical page walk through 4 levels of PwC
-                                    bool success = ooo_cpu[read_cpu].page_table_walker->initiate_page_walk(&rq_entry, rq_entry.full_addr);
-                                    if(!success){
-                                        // cannot handle miss request until one of MSHRs is available
-                                        miss_handled = 0;
-                                        // STALL[rq_entry.type]++; ?? pravesh
-                                    }
-                                    // PTW will asynchronously handle the walk and call return_data
-                                    // when translation is complete
-                                }
-                                else
-                                {
-                                    // Fallback: Direct va_to_pa translation (PTW disabled or not available)
-                                    uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
-                                    rq_entry.data = pa >> LOG2_PAGE_SIZE; 
-                                    rq_entry.event_cycle = current_core_cycle[read_cpu];
-                                    rq_entry.hit_where = hit_where_t::PTW; // STLB miss => PTW
-                                    return_data(&rq_entry);
-                                }
+                                uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
+                                rq_entry.data = pa >> LOG2_PAGE_SIZE;
+                                rq_entry.event_cycle = current_core_cycle[read_cpu];
+                                rq_entry.hit_where = hit_where_t::PTW; // STLB miss => PTW
+                                return_data(&rq_entry);
                             }
                         }
+                        } // end else (non-STLB-PTW path)
                     }
                 }
                 else 
@@ -1951,6 +1933,7 @@ int CACHE::add_rq(PACKET *packet)
 
     // check for duplicates in the read queue
     int index = RQ->check_queue(packet);
+
     if (index != -1) 
     {
         // l.log(NAME, "RQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
@@ -2348,11 +2331,6 @@ int CACHE::add_pq(PACKET *packet)
 
 void CACHE::return_data(PACKET *packet)
 {
-    // if(packet->instruction)
-    // cout <<NAME<<", addr, " << hex << packet->address << ", full_addr, " << packet->full_addr << ", vaddr, " << packet->virt_addr << ", data, " << packet->data << dec << ", ptw_level, " << packet->ptw_level  << endl;
-    
-    // l.log(NAME, "return", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "data", hex2str(packet->data), '\n');
-
     // check MSHR information
     int mshr_index = check_mshr(packet);
 
@@ -2372,7 +2350,6 @@ void CACHE::return_data(PACKET *packet)
     MSHR.entry[mshr_index].data = packet->data;
     MSHR.entry[mshr_index].pf_metadata = packet->pf_metadata;
     MSHR.entry[mshr_index].hit_where= assign_hit_where(packet->hit_where, 0);
-
 
     // ADD LATENCY
     if (MSHR.entry[mshr_index].event_cycle < current_core_cycle[packet->cpu])

@@ -28,6 +28,10 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <cstdint>
+#include <inttypes.h>
+#include <vector>
+#include <algorithm>
 
 // =====================================================================
 // CONFIGURATION - Enable/Disable logging at compile time
@@ -56,56 +60,70 @@ inline std::string hex2str(T value) {
     return oss.str();
 }
 
-// =====================================================================
-// RUNTIME CONTROLS - Can be modified in your code
-// =====================================================================
+struct PacketTrackerFilter {
+    bool track_instr = false;
+    bool track_addr = false;
+    std::vector<uint64_t> instr_id;
+    std::vector<uint64_t> ip;
 
-namespace logging {
-    // Global enable/disable switch
-    extern bool enabled;
+    bool enabled() const { return track_instr || track_addr; }
+
+    bool matches(uint64_t instr, uint64_t addr) const {
+        bool instr_ok = !track_instr || std::find(instr_id.begin(), instr_id.end(), instr) != instr_id.end();
+        bool addr_ok = !track_addr || std::find(ip.begin(), ip.end(), addr) != ip.end();
+        return instr_ok && addr_ok;
+    }
+};
+
+inline void parse_env_list(const char* env_str, std::vector<uint64_t>& out_list) {
+    if (!env_str) return;
     
-    // Per-level controls
-    extern bool debug_enabled;
-    extern bool info_enabled;
-    extern bool warn_enabled;
-    extern bool error_enabled;
+    std::stringstream ss(env_str);
+    std::string item;
     
-    // Show timestamp in logs
-    extern bool show_timestamp;
-    
-    // Show file:line information
-    extern bool show_location;
+    // Splits by comma: "123,456,789"
+    while (std::getline(ss, item, ',')) {
+        if (!item.empty()) {
+            out_list.push_back(std::strtoull(item.c_str(), nullptr, 0));
+        }
+    }
 }
 
-// =====================================================================
-// INTERNAL LOGGING FUNCTIONS
-// =====================================================================
+static PacketTrackerFilter get_packet_tracker_filter()
+{
+    PacketTrackerFilter f;
+    if (const char *instr_env = std::getenv("PACKET_TRACK_INSTR_ID")) {
+        f.track_instr = true;
+        parse_env_list(instr_env, f.instr_id);
+        // std::cout << "Tracking packets for instruction ID: " << f.instr_id << std::endl;
+    }
+    if (const char *addr_env = std::getenv("PACKET_TRACK_FULL_ADDR")) {
+        f.track_addr = true;
+        parse_env_list(addr_env, f.ip);
+        // std::cout << "Tracking packets for full address: 0x" << std::hex << f.ip << std::dec << std::endl;
 
-namespace logging {
-    // Get basename of file path
-    inline const char* basename(const char* path) {
-        const char* base = strrchr(path, '/');
-        return base ? (base + 1) : path;
     }
-    
-    // Core logging function
-    inline void log_message(const char* level, const char* file, int line, 
-                           const char* fmt, va_list args) {
-        if (!enabled) return;
-        
-        // Print level
-        std::cout << "[" << level << "] ";
-        
-        // Print location if enabled
-        if (show_location) {
-            std::cout << basename(file) << ":" << line << " ";
-        }
-        
-        // Print message
-        char buffer[4096];
-        vsnprintf(buffer, sizeof(buffer), fmt, args);
-        std::cout << buffer << std::endl;
-    }
+    return f;
+}
+
+
+#include <source_location>
+#include <type_traits>
+#include <string>
+
+// helper to check if type is iterable
+template<typename T, typename = void>
+struct is_iterable : std::false_type{};
+
+template<typename T>
+struct is_iterable<T, std::void_t< decltype(std::begin(std::declval<T&>())), decltype(std::end(std::declval<T&>()))> >: std::true_type {};
+
+// ip, addr, Component NAME
+template<typename T>
+inline void doctor(const T& val1, const T& val2, std::string NAME, std::string msg, const std::source_location loc=std::source_location::current()) {
+    PacketTrackerFilter f = get_packet_tracker_filter();
+    if(f.matches(0,val1))
+    std::cout << "Func: " << loc.function_name() << "," << loc.line() << "," << hex2str(val1) << "," << hex2str(val2) << "," << NAME << "," << msg << "\n";
 }
 
 // =====================================================================
@@ -146,115 +164,5 @@ extern Logger front_end_logger;
 extern Logger o3_logger;
 extern Logger debug;
 
-// =====================================================================
-// LOGGING MACROS - Main API
-// =====================================================================
-
-#ifdef ENABLE_LOGGING
-
-// Debug level - detailed debugging information
-#define LOG_DEBUG(fmt, ...) \
-    do { \
-        if (logging::enabled && logging::debug_enabled) { \
-            std::cout << "[DEBUG] " << __FILE__ << ":" << __LINE__ << " "; \
-            printf(fmt, ##__VA_ARGS__); \
-            std::cout << std::endl; \
-        } \
-    } while(0)
-
-// Info level - general information
-#define LOG_INFO(fmt, ...) \
-    do { \
-        if (logging::enabled && logging::info_enabled) { \
-            std::cout << "[INFO] "; \
-            if (logging::show_location) std::cout << logging::basename(__FILE__) << ":" << __LINE__ << " "; \
-            printf(fmt, ##__VA_ARGS__); \
-            std::cout << std::endl; \
-        } \
-    } while(0)
-
-// Warning level - potential issues
-#define LOG_WARN(fmt, ...) \
-    do { \
-        if (logging::enabled && logging::warn_enabled) { \
-            std::cout << "[WARN] "; \
-            if (logging::show_location) std::cout << logging::basename(__FILE__) << ":" << __LINE__ << " "; \
-            printf(fmt, ##__VA_ARGS__); \
-            std::cout << std::endl; \
-        } \
-    } while(0)
-
-// Error level - serious problems
-#define LOG_ERROR(fmt, ...) \
-    do { \
-        if (logging::enabled && logging::error_enabled) { \
-            std::cerr << "[ERROR] " << logging::basename(__FILE__) << ":" << __LINE__ << " "; \
-            fprintf(stderr, fmt, ##__VA_ARGS__); \
-            std::cerr << std::endl; \
-        } \
-    } while(0)
-
-// Conditional logging - only log if condition is true
-#define LOG_IF(condition, level, fmt, ...) \
-    do { \
-        if (condition) { \
-            LOG_##level(fmt, ##__VA_ARGS__); \
-        } \
-    } while(0)
-
-// Pravesh: Specialized logging for page table operations
-#define LOG_PTW(fmt, ...) \
-    do { \
-        if (logging::enabled && logging::debug_enabled) { \
-            std::cout << "[PTW] " << logging::basename(__FILE__) << ":" << __LINE__ << " "; \
-            printf(fmt, ##__VA_ARGS__); \
-            std::cout << std::endl; \
-        } \
-    } while(0)
-
-// Cache-specific logging
-#define LOG_CACHE(cache_name, fmt, ...) \
-    do { \
-        if (logging::enabled && logging::debug_enabled) { \
-            std::cout << "[" << cache_name << "] "; \
-            printf(fmt, ##__VA_ARGS__); \
-            std::cout << std::endl; \
-        } \
-    } while(0)
-
-// Hex address logging helper
-#define LOG_ADDR(msg, addr) \
-    LOG_DEBUG("%s: 0x%lx", msg, (uint64_t)(addr))
-
-#else  // ENABLE_LOGGING not defined
-
-// No-op macros when logging is disabled (zero overhead)
-#define LOG_DEBUG(fmt, ...)       do {} while(0)
-#define LOG_INFO(fmt, ...)        do {} while(0)
-#define LOG_WARN(fmt, ...)        do {} while(0)
-#define LOG_ERROR(fmt, ...)       do {} while(0)
-#define LOG_IF(cond, lvl, fmt, ...)  do {} while(0)
-#define LOG_PTW(fmt, ...)         do {} while(0)
-#define LOG_CACHE(name, fmt, ...) do {} while(0)
-#define LOG_ADDR(msg, addr)       do {} while(0)
-
-#endif // ENABLE_LOGGING
-
-// =====================================================================
-// HELPER MACROS
-// =====================================================================
-
-// Log function entry/exit for debugging
-#define LOG_FUNC_ENTRY() LOG_DEBUG(">>> Entering %s", __func__)
-#define LOG_FUNC_EXIT()  LOG_DEBUG("<<< Exiting %s", __func__)
-
-// Assert with logging
-#define LOG_ASSERT(condition, fmt, ...) \
-    do { \
-        if (!(condition)) { \
-            LOG_ERROR("ASSERTION FAILED: " fmt, ##__VA_ARGS__); \
-            assert(condition); \
-        } \
-    } while(0)
 
 #endif // LOGGING_H

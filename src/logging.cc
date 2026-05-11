@@ -23,5 +23,5 @@ namespace logging {
 Logger l(false);
 Logger debug(false);
 Logger cache_logger(false);
-Logger front_end_logger(true);
+Logger front_end_logger(false);
 Logger o3_logger(false);

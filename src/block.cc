@@ -2,6 +2,7 @@
 #include <sstream>
 #include <iterator>
 #include "block.h"
+#include "logging.h"
 
 uint64_t PACKET::next_id = 0;
 
