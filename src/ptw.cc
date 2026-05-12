@@ -407,13 +407,13 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     uint32_t lvl             = packet->ptw_level;
     uint64_t next_level_base = packet->data; // PTE value = next-level table base (or phys addr)
 
-    // Track where the data came from
+    // Track where the data came from (use range checks to catch RQ/WQ/MSHR variants)
     uint8_t hit_src = 0;
-    if      (packet->hit_where == hit_where_t::L1D) { hit_src = 1; stats.level_stats[lvl].l1d_hits++; }
-    else if (packet->hit_where == hit_where_t::L1I) { hit_src = 2; stats.level_stats[lvl].l1i_hits++; }
-    else if (packet->hit_where == hit_where_t::L2C) { hit_src = 3; stats.level_stats[lvl].l2c_hits++; }
-    else if (packet->hit_where == hit_where_t::LLC) { hit_src = 4; stats.level_stats[lvl].llc_hits++; }
-    else if (packet->hit_where == hit_where_t::DRAM){ hit_src = 5; stats.level_stats[lvl].dram_hits++;}
+    if      (packet->hit_where >= hit_where_t::L1D && packet->hit_where <= hit_where_t::L1D_MSHR) { hit_src = 1; stats.level_stats[lvl].l1d_hits++; }
+    else if (packet->hit_where >= hit_where_t::L1I && packet->hit_where <= hit_where_t::L1I_MSHR) { hit_src = 2; stats.level_stats[lvl].l1i_hits++; }
+    else if (packet->hit_where >= hit_where_t::L2C && packet->hit_where <= hit_where_t::L2C_MSHR) { hit_src = 3; stats.level_stats[lvl].l2c_hits++; }
+    else if (packet->hit_where >= hit_where_t::LLC && packet->hit_where <= hit_where_t::LLC_MSHR) { hit_src = 4; stats.level_stats[lvl].llc_hits++; }
+    else if (packet->hit_where == hit_where_t::DRAM)                                             { hit_src = 5; stats.level_stats[lvl].dram_hits++; }
 
     if (lvl >= 0) {
 
