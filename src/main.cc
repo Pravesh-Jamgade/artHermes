@@ -1424,6 +1424,7 @@ int main(int argc, char** argv)
             printf("CPU_%d runs %s\n", count_traces, argv[i]);
 
             sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
+            cout << " SSSSSSSSSSSSSS"  << ooo_cpu[count_traces].trace_string << '\n';
 
             std::string full_name(argv[i]);
             std::string last_dot = full_name.substr(full_name.find_last_of("."));

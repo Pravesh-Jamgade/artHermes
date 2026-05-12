@@ -10,7 +10,7 @@
 ###############################################################
 
 # configurations
-BASE = --warmup_instructions=100000000 --simulation_instructions=500000000 --llc_replacement_type=ship --config=$(HERMES_HOME)/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
+BASE = --llc_replacement_type=ship --config=$(HERMES_HOME)/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
 SMS = --l2c_prefetcher_types=sms --config=$(HERMES_HOME)/config/sms.ini --l2c_prefetcher_force_prefetch_at_llc=true
 SPP = --l2c_prefetcher_types=spp_ppf_dev --config=$(HERMES_HOME)/config/spp_ppf_dev.ini --ppf_perc_threshold_hi=2000
 MLOP = --l2c_prefetcher_types=mlop --config=$(HERMES_HOME)/config/mlop.ini --mlop_l2c_thresh=2.0
