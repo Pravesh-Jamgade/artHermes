@@ -32,6 +32,7 @@ namespace knob
     extern bool enable_ddrp_monitor;
     extern bool     enable_offchip_tracing;
     extern int itlb_oracle_translation;
+    extern bool partial_window_trace;
 }
 
 void O3_CPU::initialize_core()
@@ -242,6 +243,26 @@ void O3_CPU::read_from_trace()
             }
             else // successfully read the trace
             { 
+
+                // enable 50 M skip in 100 M window
+                if(knob::partial_window_trace)
+                {
+                    interval_counter->incr();
+
+                    // check if sleep is needed
+                    if(interval_counter->should_sleep())
+                    {
+                        continue_reading = 1;
+                        continue;
+                    }
+                    // check if window finished
+                    if(interval_counter->window_finished())
+                    {
+                        
+                        interval_counter->reset();
+                    }
+                } 
+
                 if(instr_unique_id == 0)
                 {
                     current_instr = next_instr = trace_read_instr;
@@ -2185,7 +2206,6 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
 
             handle_merged_translation(&queue->entry[index]);
-            ROB.entry[rob_index].translation_hit_tlb = queue->entry[index].hit_where != hit_where_t::PTW ? 1 : 0;
         }
         else 
         { 
@@ -2217,10 +2237,12 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
 
             handle_merged_translation(&queue->entry[index]);
-
-            ROB.entry[rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
-            ROB.entry[rob_index].translation_hit_tlb = queue->entry[index].hit_where != hit_where_t::PTW ? 1 : 0;
         }
+
+        // pravesh
+        ROB.entry[rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
+        ROB.entry[rob_index].translation_hit_tlb = queue->entry[index].hit_where==hit_where_t::DTLB || queue->entry[index].hit_where==hit_where_t::STLB;
+        ROB.entry[rob_index].trans_hit_where = queue->entry[index].hit_where;
 
         ROB.entry[rob_index].event_cycle = queue->entry[index].event_cycle;
     }
@@ -2271,20 +2293,40 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
             release_load_queue(lq_index);
             handle_merged_load(&queue->entry[index]);
+        }
 
+        // pravesh
             ROB.entry[rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
             ROB.entry[rob_index].data_hit_where = queue->entry[index].hit_where;
-            
-            // Record TLB hit/miss + data hitwhere combinations
-            {
-                bool tlb_hit = ROB.entry[rob_index].translation_hit_tlb == 1;
-                if (tlb_hit) {
-                    stats.hitwhere_combinations.tlb_hit_data_hitwhere[static_cast<uint32_t>(ROB.entry[rob_index].data_hit_where)]++;
+
+            hit_where_t data_hit_loc = queue->entry[index].hit_where;
+
+            auto clamp_hit_src = [](hit_where_t hit_loc) -> uint32_t {
+                uint32_t h = static_cast<uint32_t>(hit_loc);
+                if      (h >= static_cast<uint32_t>(hit_where_t::L1D) && h <= static_cast<uint32_t>(hit_where_t::L1D_MSHR)) { return static_cast<uint32_t>(hit_where_t::L1D); }
+                else if (h >= static_cast<uint32_t>(hit_where_t::L1I) && h <= static_cast<uint32_t>(hit_where_t::L1I_MSHR)) { return static_cast<uint32_t>(hit_where_t::L1I); }
+                else if (h >= static_cast<uint32_t>(hit_where_t::L2C) && h <= static_cast<uint32_t>(hit_where_t::L2C_MSHR)) { return static_cast<uint32_t>(hit_where_t::L2C); }
+                else if (h >= static_cast<uint32_t>(hit_where_t::LLC) && h <= static_cast<uint32_t>(hit_where_t::LLC_MSHR)) { return static_cast<uint32_t>(hit_where_t::LLC); }
+                else if (h == static_cast<uint32_t>(hit_where_t::DRAM))                                   { return static_cast<uint32_t>(hit_where_t::DRAM); }
+                else                                                                                      { return static_cast<uint32_t>(hit_loc); }
+            };
+
+            uint32_t dhw = clamp_hit_src(data_hit_loc);
+
+            if (dhw < NumHitWheres) {
+                if (ROB.entry[rob_index].translation_hit_tlb) {
+                    stats.hitwhere_combinations.tlb_hit_data_hitwhere[dhw]++;
                 } else {
-                    stats.hitwhere_combinations.tlb_miss_data_hitwhere[static_cast<uint32_t>(ROB.entry[rob_index].data_hit_where)]++;
+                    stats.hitwhere_combinations.tlb_miss_data_hitwhere[dhw]++;
+                }
+                // Record per-level PWC miss × data hitwhere cross-product
+                uint32_t pwc_bits = ROB.entry[rob_index].pwc_miss_mem_hitwhere;
+                for (int lvl = 0; lvl < 4 && pwc_bits != 0; lvl++) {
+                    uint32_t pwc_src = (pwc_bits >> (lvl * 5)) & 0x1F;
+                    if (pwc_src > 0 && pwc_src < NumHitWheres)
+                        stats.hitwhere_combinations.pwc_miss_and_data_hitwhere[lvl][pwc_src][dhw]++;
                 }
             }
-        }
     }
 
     // remove this entry

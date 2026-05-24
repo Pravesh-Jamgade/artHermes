@@ -28,6 +28,8 @@ extern uint32_t SCHEDULING_LATENCY, EXEC_LATENCY, DECODE_LATENCY;
 namespace knob
 {
     extern uint32_t num_rob_partitions;
+    extern uint32_t window_size;
+    extern float sleep_frac;
 }
 
 class load_per_ip_info_t
@@ -67,6 +69,7 @@ public:
     FILE *trace_file;
     char trace_string[1024];
     char gunzip_command[1024];
+    IWCounter* interval_counter;
 
     // instruction
     input_instr next_instr;
@@ -160,8 +163,10 @@ public:
         } ddrp;
         struct
         {
-            uint64_t tlb_hit_data_hitwhere[hit_where_t::NumHitWheres];
-            uint64_t tlb_miss_data_hitwhere[hit_where_t::NumHitWheres];
+            uint64_t tlb_hit_data_hitwhere[hit_where_t::NumHitWheres] = {0};
+            uint64_t tlb_miss_data_hitwhere[hit_where_t::NumHitWheres] = {0};
+            uint64_t pwc_miss_and_data_hitwhere[4][hit_where_t::NumHitWheres][hit_where_t::NumHitWheres] = {};
+            map<hit_where_t, map<hit_where_t, uint64_t>> ptw_and_data_hitwhere;
         } hitwhere_combinations;
     } stats;
 
@@ -187,6 +192,8 @@ public:
 
         // trace
         trace_file = NULL;
+
+        interval_counter = new IWCounter(50000000, 0.25); // 50M instructions with 25% sampling
 
         // instruction
         instr_unique_id = 0;

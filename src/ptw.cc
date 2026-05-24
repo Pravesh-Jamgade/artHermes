@@ -409,12 +409,12 @@ void PTWclass::handle_memory_response(PACKET *packet) {
 
     // Track where the data came from (use range checks to catch RQ/WQ/MSHR variants)
     uint8_t hit_src = 0;
-    if      (packet->hit_where >= hit_where_t::L1D && packet->hit_where <= hit_where_t::L1D_MSHR) { hit_src = 1; stats.level_stats[lvl].l1d_hits++; }
-    else if (packet->hit_where >= hit_where_t::L1I && packet->hit_where <= hit_where_t::L1I_MSHR) { hit_src = 2; stats.level_stats[lvl].l1i_hits++; }
-    else if (packet->hit_where >= hit_where_t::L2C && packet->hit_where <= hit_where_t::L2C_MSHR) { hit_src = 3; stats.level_stats[lvl].l2c_hits++; }
-    else if (packet->hit_where >= hit_where_t::LLC && packet->hit_where <= hit_where_t::LLC_MSHR) { hit_src = 4; stats.level_stats[lvl].llc_hits++; }
-    else if (packet->hit_where == hit_where_t::DRAM)                                             { hit_src = 5; stats.level_stats[lvl].dram_hits++; }
-
+    if      (packet->hit_where >= hit_where_t::L1D && packet->hit_where <= hit_where_t::L1D_MSHR) { hit_src = hit_where_t::L1D; stats.level_stats[lvl].l1d_hits++; }
+    else if (packet->hit_where >= hit_where_t::L1I && packet->hit_where <= hit_where_t::L1I_MSHR) { hit_src = hit_where_t::L1I; stats.level_stats[lvl].l1i_hits++; }
+    else if (packet->hit_where >= hit_where_t::L2C && packet->hit_where <= hit_where_t::L2C_MSHR) { hit_src = hit_where_t::L2C; stats.level_stats[lvl].l2c_hits++; }
+    else if (packet->hit_where >= hit_where_t::LLC && packet->hit_where <= hit_where_t::LLC_MSHR) { hit_src = hit_where_t::LLC; stats.level_stats[lvl].llc_hits++; }
+    else if (packet->hit_where == hit_where_t::DRAM)                                             { hit_src = hit_where_t::DRAM; stats.level_stats[lvl].dram_hits++; }
+    
     if (lvl >= 0) {
 
         // More levels to walk: push a new OutstandingWalk for the next level.
@@ -437,6 +437,7 @@ void PTWclass::handle_memory_response(PACKET *packet) {
             }
 
             me->level_stats[lvl].hit_where = hit_src;
+            me->packet.pwc_miss_mem_hitwhere |= ((uint32_t)hit_src << (lvl * 5));
 
             // Insert into PwC: key = PTE byte address, value = next-level table base
             pwc_insert(me->current_pte_addr, next_level_base, lvl);
@@ -510,7 +511,11 @@ void PTWclass::complete_page_walk(PACKET &pkt, uint64_t translated_pa) {
     pkt.data_pa        = translated_pa;
     pkt.translated     = COMPLETED;
     pkt.data           = translated_pa >> LOG2_PAGE_SIZE;
-    pkt.hit_where      = hit_where_t::PTW;
+    // pkt.hit_where      = hit_where_t::PTW;
+
+    // Store PWC miss info directly in ROB entry for tracking in complete_data_fetch
+    if (pkt.rob_index >= 0)
+        ooo_cpu[cpu].ROB.entry[pkt.rob_index].pwc_miss_mem_hitwhere = pkt.pwc_miss_mem_hitwhere;
 
     // cerr << "[PTW_DIAG] complete_page_walk vaddr=" << hex2str(pkt.full_addr)
     //      << " translated_pa=" << hex2str(translated_pa)

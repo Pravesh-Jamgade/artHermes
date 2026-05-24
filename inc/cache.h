@@ -5,6 +5,7 @@
 #include <random>
 #include "memory_class.h"
 #include "prefetcher.h"
+#include "llc_pred_perc.h"
 #include "defs.h"
 #include "cache_repl_base.h"
 #include "const.h"
@@ -132,6 +133,9 @@ class CACHE : public MEMORY {
     std::default_random_engine generator;
     std::bernoulli_distribution *dist;
 
+    // Deadblock pred: LLC read hit/miss perceptron predictor (only used when cache_type == IS_LLC)
+    PereceptronDeadblockPredictor *llc_pred_perc;
+
     // constructor
     // constructor
     CACHE(string v1, uint32_t v2, int v3, uint32_t v4, uint32_t v5, uint32_t v6, uint32_t v7, uint32_t v8) 
@@ -160,6 +164,7 @@ class CACHE : public MEMORY {
         MAX_FILL = 1;
 
         llc_repl = NULL;
+        llc_pred_perc = NULL;
     }
 
     // destructor
@@ -168,6 +173,7 @@ class CACHE : public MEMORY {
             delete[] block[i];
         delete[] block;
         delete RQ;
+        delete llc_pred_perc;
     };
 
     void reset_stats(uint32_t cpu)

@@ -28,7 +28,8 @@ struct PTW_LevelStats {
     uint64_t access_count;  // accesses to this level
     uint64_t hit_count;     // cache hits at this level
     uint64_t miss_count;    // cache misses at this level
-    uint8_t  hit_where;     // where result came from (0=PwC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM)
+    uint8_t  hit_where;     // where result came from (0=PwC)
+                             // 1=L1D, 2=L1I, 3=L2C, 4=LLC, 5=DRAM
     uint8_t  page_fault;    // 1 if this level had a page fault
     PTW_LevelStats() : access_count(0), hit_count(0), miss_count(0), hit_where(0), page_fault(0) {}
 };

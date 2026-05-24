@@ -6,6 +6,7 @@
 #include "uncore.h"
 #include "logging.h"
 #include "buddy_allocator.h"
+#include "llc_pred_perc.h"
 
 // =====================================================================
 // CACHE.CC - Cache Hierarchy Implementation
@@ -52,6 +53,7 @@ namespace knob
     extern bool     l2c_pseudo_perfect_enable_frontal;
     extern bool     l2c_pseudo_perfect_enable_dorsal;
     extern bool     enable_ptw;
+    extern bool     knob_doa_predictor;
     extern bool     enable_ddrp;
     extern bool     offchip_pred_mark_merged_load;
     extern bool     enable_itlb_priority_rq;
@@ -402,6 +404,15 @@ void CACHE::handle_fill()
             }
 
             fill_cache(set, way, &MSHR.entry[mshr_index]);
+
+            // Deadblock pred: store prediction in block on fill, reset usage, train
+            if (cache_type == IS_LLC && MSHR.entry[mshr_index].type == LOAD 
+                && knob::knob_doa_predictor && llc_pred_perc != NULL)
+            {
+                bool pred = llc_pred_perc->predict(MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].ip);
+                block[set][way].doa_pred_bit = pred; 
+                block[set][way].usage = 0; // reset usage on new install
+            }
 
             // RFO marks cache line dirty
             if (cache_type == IS_L1D)
@@ -1085,6 +1096,12 @@ void CACHE::handle_read()
                     block[set][way].prefetch = 0;
                 }
                 block[set][way].used = 1;
+
+                // Deadblock pred: store prediction in block on hit, increment usage, train
+                if (cache_type == IS_LLC && rq_entry.type == LOAD && knob::knob_doa_predictor && llc_pred_perc != NULL)
+                {
+                    block[set][way].usage++; // Deadblock pred: increment usage on each hit
+                }
 
                 HIT[rq_entry.type]++;
                 ACCESS[rq_entry.type]++;
@@ -2022,6 +2039,13 @@ int CACHE::add_rq(PACKET *packet)
         rq_entry.event_cycle += LATENCY;
     }
 
+    // // Deadblock pred: predict read hit/miss for LOADs at LLC
+    // if (cache_type == IS_LLC && rq_entry.type == LOAD && knob::knob_doa_predictor && llc_pred_perc != NULL)
+    // {
+    //     bool pred_hit = llc_pred_perc->predict(rq_entry.full_addr, rq_entry.ip);
+    //     rq_entry.doa_pred_bit = pred_hit;
+    // }
+
     DP ( if (warmup_complete[rq_entry.cpu]) {
     cout << "[" << NAME << "_RQ] " <<  __func__ << " instr_id: " << rq_entry.instr_id << " address: " << hex << rq_entry.address;
     cout << " full_addr: " << rq_entry.full_addr << dec;
@@ -2349,7 +2373,8 @@ void CACHE::return_data(PACKET *packet)
     MSHR.entry[mshr_index].returned = COMPLETED;
     MSHR.entry[mshr_index].data = packet->data;
     MSHR.entry[mshr_index].pf_metadata = packet->pf_metadata;
-    MSHR.entry[mshr_index].hit_where= assign_hit_where(packet->hit_where, 0);
+    MSHR.entry[mshr_index].hit_where = packet->hit_where;
+    MSHR.entry[mshr_index].pwc_miss_mem_hitwhere = packet->pwc_miss_mem_hitwhere;
 
     // ADD LATENCY
     if (MSHR.entry[mshr_index].event_cycle < current_core_cycle[packet->cpu])
@@ -2596,6 +2621,15 @@ void CACHE::track_stats_from_victim(uint32_t set, uint32_t way)
         stats.eviction.dep_load_total += dep_load;
         if(dep_load >= stats.eviction.dep_load_max) stats.eviction.dep_load_max = dep_load;
         if(dep_load <= stats.eviction.dep_load_min) stats.eviction.dep_load_min = dep_load;
+    }
+
+    // Deadblock pred: record eviction outcome (doa_pred_bit vs actual usage)
+    if (cache_type == IS_LLC && knob::knob_doa_predictor && llc_pred_perc != NULL)
+    {
+        bool pred_doa = block[set][way].doa_pred_bit;
+        bool actual_doa = (block[set][way].usage == 0);
+        llc_pred_perc->record_eviction(pred_doa, actual_doa);
+        llc_pred_perc->train(block[set][way].full_addr, block[set][way].ip, pred_doa, actual_doa);
     }
 }
 

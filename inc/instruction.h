@@ -161,7 +161,9 @@ class ooo_model_instr {
     int data_went_offchip=0;
 
     bool translation_hit_tlb = 0;
+    hit_where_t trans_hit_where;
     hit_where_t data_hit_where;
+    uint32_t pwc_miss_mem_hitwhere;
 
     ooo_model_instr() {
 
@@ -182,7 +184,9 @@ class ooo_model_instr {
         translation_went_offchip = 0;
         data_went_offchip = 0;
 
+        trans_hit_where = INV;
         data_hit_where = INV;
+        pwc_miss_mem_hitwhere = 0;
 
         is_branch = 0;
         is_memory = 0;

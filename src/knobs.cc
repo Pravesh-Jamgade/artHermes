@@ -48,6 +48,10 @@ namespace knob
     bool enable_cache_criticality = false;
     uint32_t llc_criticality_mispred_branch_thresh = 1;
     uint32_t llc_criticality_dep_load_thresh = 3;
+
+    // Deadblock pred: LLC read hit/miss predictor
+    bool knob_doa_predictor = false;
+
     uint32_t llc_criticality_dep_all_thresh = 80;
 	bool     llc_pseudo_perfect_enable = false;
 	float	 llc_pseudo_perfect_prob = 0.1; 
@@ -417,8 +421,13 @@ namespace knob
     // int32_t  ddrp_monitor_scooby_reward_none = -4;
 	bool ddrp_monitor_enable_hysterisis = false;
 
-	// PTW / Shadow page-table
+	// PTW / Shadow page-table Pravesh
 	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
+
+	// Trace and State machine
+	bool partial_window_trace = false;
+	uint32_t window_size = 50000000;
+	float sleep_frac = 0.25;
 
 	// When true: instruction-side translation is resolved via the buddy allocator
 	// at zero latency (no ITLB/STLB/PTW cost).  When false: instructions go
@@ -1865,10 +1874,6 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	}
 
 	// Direcr DRAM Prefetch (DDRP)
-	else if (MATCH("", "enable_ptw"))
-	{
-		knob::enable_ptw = !strcmp(value, "true") ? true : false;
-	}
 	else if (MATCH("", "enable_ddrp"))
 	{
 		knob::enable_ddrp = !strcmp(value, "true") ? true : false;
@@ -1920,6 +1925,31 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "ddrp_monitor_enable_hysterisis"))
 	{
 		knob::ddrp_monitor_enable_hysterisis = !strcmp(value, "true") ? true : false;
+	}
+	
+
+	// Pravesh
+	// Deadblock pred: LLC read hit/miss predictor
+	else if (MATCH("", "knob_doa_predictor"))
+	{
+		knob::knob_doa_predictor = !strcmp(value, "true") ? true : false;
+	}
+	// PTW
+	else if (MATCH("", "enable_ptw"))
+	{
+		knob::enable_ptw = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "partial_window_trace"))
+	{
+		knob::partial_window_trace = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "window_size"))
+	{
+		knob::window_size = atoi(value);
+	}
+	else if (MATCH("", "sleep_frac"))
+	{
+		knob::sleep_frac = atof(value);
 	}
 	
 

@@ -5,6 +5,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <iostream>
 
 void gen_random(char *s, const int len);
 uint32_t folded_xor(uint64_t value, uint32_t num_folds);
@@ -111,6 +112,60 @@ class Counter
         inline uint64_t val() {return value;}
         inline void     reset() {value = 0;}
         inline uint64_t max() {return max_value;}
+};
+
+class IWCounter
+{
+    public:
+        uint32_t window_size = 0;
+        uint32_t sleep_window = 0; // number of instruction to sskip
+        uint32_t init_val = 0;
+        bool lstart = false;
+        bool lstop = false;
+        uint64_t actual_instruction_count = 0;
+
+        IWCounter() : window_size(0), sleep_window(0) {}
+        IWCounter(uint32_t w, float frac_sleep) : window_size(w) {
+            sleep_window = frac_sleep * window_size;
+        }
+
+        inline void incr(){
+            actual_instruction_count++;
+            init_val++;
+        }
+
+        inline bool should_sleep() {
+            // log_start();
+            bool ret = init_val < sleep_window;
+
+            // if(!ret)
+            // log_end();
+            return ret;
+        }
+
+        inline void log_start(){
+            if(!lstart) {
+                std::cout << "window_started,init_val=" << init_val << '\n';
+                lstart = true;
+            }
+        }
+
+        inline void log_end(){
+            if(lstart && !lstop) {
+                std::cout << "window_finished,init_val=" << init_val << '\n';
+                lstop = true;
+            }
+        }
+
+        inline void reset() {
+            lstart = false;
+            lstop = false;
+            init_val = 0;
+        }
+
+        inline bool window_finished() {
+            return init_val >= window_size;
+        }
 };
 
 #endif /* UTIL_H */

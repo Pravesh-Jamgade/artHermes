@@ -11,6 +11,7 @@
 #include <numeric>
 #include <cstdlib>
 #include "logging.h"
+#include "llc_pred_perc.h"
 
 #define FIXED_FLOAT(x) std::fixed << std::setprecision(5) << (x)
 // #define PRINT_AUX_STATS 1
@@ -40,6 +41,9 @@ namespace knob
     extern uint64_t measure_cache_acc_epoch;
     extern bool     l1d_perfect;
     extern bool     l2c_perfect;
+    extern bool     partial_window_trace;
+    extern uint32_t window_size;
+    extern float    sleep_frac;
     extern bool     llc_perfect;
     extern bool     l1d_semi_perfect;
     extern bool     l2c_semi_perfect;
@@ -80,6 +84,7 @@ namespace knob
     extern uint32_t dram_cntlr_ddrp_buffer_hash_type;
     extern bool     enable_ddrp_monitor;
     extern int itlb_oracle_translation;
+    extern bool knob_doa_predictor;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -175,6 +180,13 @@ void print_knobs()
         << "dram_size " << DRAM_SIZE << endl
         << "dram_pages " << DRAM_PAGES << endl
         << endl;
+
+    // Partial window trace configuration
+    if (knob::partial_window_trace) {
+        cout << "partial_window_trace_config,window_size="
+                << knob::window_size << ",skip_frac=" << knob::sleep_frac << endl;
+    }
+
     
     print_core_config();
     print_cache_config();
@@ -246,6 +258,21 @@ void print_core_roi_stats(uint32_t cpu)
             }
         }   
         cout << endl;
+
+        // Per-level PWC miss × data hitwhere combinations
+        static const char *lvl_names[4] = {"L0_PTE", "L1_PMD", "L2_PUD", "L3_PML4"};
+        for (int lvl = 0; lvl < 4; lvl++) {
+            for (uint32_t pwc_i = 0; pwc_i < NumHitWheres; pwc_i++) {
+                for (uint32_t data_i = 0; data_i < NumHitWheres; data_i++) {
+                    uint64_t cnt = ooo_cpu[cpu].stats.hitwhere_combinations.pwc_miss_and_data_hitwhere[lvl][pwc_i][data_i];
+                    if (cnt > 0) {
+                        cout << "Core_" << cpu << "_pwc_miss_and_data_hitwhere_combinations,"
+                             << lvl_names[lvl] << "_pwchit_" << hit_where_names[pwc_i]
+                             << "-data_" << hit_where_names[data_i] << ", " << cnt << endl;
+                    }
+                }
+            }
+        }
     }
     
     for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)
@@ -402,6 +429,13 @@ void print_core_roi_stats(uint32_t cpu)
 
     // OFFCHIP PREDICTOR STATS
     ooo_cpu[cpu].dump_stats_offchip_predictor();
+
+    // Deadblock pred: LLC perceptron predictor stats (shared, print once)
+    if (cpu == 0 && knob::knob_doa_predictor && uncore.LLC.llc_pred_perc != NULL) {
+        string dbp = "Core_0_deadblock_pred";
+        uncore.LLC.llc_pred_perc->dump_stats(stdout, dbp.c_str());
+        cout << endl;
+    }
 
     cout << "Core_" << cpu << "_DDRP_total " << ooo_cpu[cpu].stats.ddrp.total << endl
          << "Core_" << cpu << "_DDRP_issued_after_direct_translation " << ooo_cpu[cpu].stats.ddrp.issued[0] << endl
@@ -1607,6 +1641,9 @@ int main(int argc, char** argv)
         uncore.LLC.fill_level = FILL_LLC;
         uncore.LLC.create_rq();
         uncore.LLC.MAX_READ = NUM_CPUS;
+        // Deadblock pred: initialize LLC perceptron predictor
+        if (knob::knob_doa_predictor)
+            uncore.LLC.llc_pred_perc = new PereceptronDeadblockPredictor();
         uncore.LLC.upper_level_icache[i] = &ooo_cpu[i].L2C;
         uncore.LLC.upper_level_dcache[i] = &ooo_cpu[i].L2C;
         uncore.LLC.lower_level = &uncore.DRAM;
@@ -1643,6 +1680,8 @@ int main(int argc, char** argv)
         num_page[i] = 0;
         minor_fault[i] = 0;
         major_fault[i] = 0;
+
+        ooo_cpu[i].interval_counter = new IWCounter(knob::window_size, knob::sleep_frac);
     }
 
     uncore.LLC.llc_initialize_replacement();
@@ -1783,7 +1822,8 @@ int main(int argc, char** argv)
                 cout << "Finished CPU " << i << " instructions: " << ooo_cpu[i].finish_sim_instr << " cycles: " << ooo_cpu[i].finish_sim_cycle;
                 cout << " cumulative IPC: " << ((float) ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle);
                 cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
-
+                if(knob::partial_window_trace)
+                    cout << "partial window trace is enabled, actual instructions read from trace file, " << ooo_cpu[i].interval_counter->actual_instruction_count << endl;
                 record_roi_stats(i, &ooo_cpu[i].ITLB);
                 record_roi_stats(i, &ooo_cpu[i].DTLB);
                 record_roi_stats(i, &ooo_cpu[i].STLB);

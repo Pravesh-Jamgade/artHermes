@@ -43,6 +43,8 @@ class BLOCK {
     bool critical_pred;
     uint64_t fill_ip;
     uint32_t reuse_frontal_dorsal[NUM_PARTITION_TYPES];
+    uint32_t doa_pred_bit;   // Deadblock pred: LLC perceptron prediction (0=unset, 1 doa)
+    uint32_t usage;          // Deadblock pred: hit counter (0 on fill, incremented on each hit)
 
     BLOCK() {
         valid = 0;
@@ -63,6 +65,8 @@ class BLOCK {
         instr_id = 0;
 
         lru = 0;
+        doa_pred_bit = 0; // Deadblock pred
+        usage = 0;         // Deadblock pred
 
         reset_metadata();
     };
@@ -171,6 +175,8 @@ class PACKET {
     void *ptw_walk_ptr;            // pointer back to OutstandingWalk
 
     uint8_t went_offchip_pred; // populated from corresponding LQ entry
+    uint32_t doa_pred_bit; // Deadblock pred: LLC perceptron prediction (0=unset, 1=predicted hit, 2=predicted miss)
+    uint32_t pwc_miss_mem_hitwhere; // PWC miss memory hit_where: 5 bits per level, lvl0=bits0-4,...
 
     PACKET() {
         id = next_id++;
@@ -240,6 +246,8 @@ class PACKET {
             }
         }
         went_offchip_pred = 0;
+        doa_pred_bit = 0; // Deadblock pred
+        pwc_miss_mem_hitwhere = 0;
 
         // PTW defaults
         from_ptw = 0;
