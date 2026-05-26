@@ -7,6 +7,7 @@
 #include "champsim.h"
 #include "defs.h"
 #include "block.h"
+#include "offchip_pred_perc.h"
 
 // Page Walk Cache (PwC) configuration for 4 levels
 // Fully associative (single set) per level; total entries preserved.
@@ -66,6 +67,9 @@ struct PageWalkCacheLevel {
 class PTWclass {
 public:
     uint32_t cpu;
+
+    // off-chip predictor
+    OffchipPredPerc *trans_offchip_pred;
     
     // Pointers to TLB caches for returning completed translations
     class CACHE *stlb_cache;
@@ -145,6 +149,12 @@ public:
             uint64_t llc_hits;
             uint64_t dram_hits;
         } level_stats[PWC_TOTAL_LEVELS];
+
+        struct offchip_ddrp_stats {
+            uint32_t ddrp_offchip_calls;
+            uint32_t ddrp_offchip_sent;
+            uint32_t ddrp_offchip_stalled;
+        } ddrp_stat;
         
         uint64_t total_page_faults;
     } stats;

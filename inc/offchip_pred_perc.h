@@ -98,6 +98,9 @@ class OffchipPredPerc : public OffchipPredBase
         string print_activated_features(vector<int32_t> activated_features);
         void check_and_update_act_thresh();
 
+        state_info_t* get_state(PACKET* packet);
+        void get_control_flow_signatures(PACKET* packet, uint64_t &last_n_load_pc_sig, uint64_t &last_n_pc_sig);
+
     public:
         OffchipPredPerc(uint32_t cpu, string _type, uint64_t _seed);
         ~OffchipPredPerc();
@@ -107,6 +110,9 @@ class OffchipPredPerc : public OffchipPredBase
         void reset_stats();
         void train(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry);
         bool predict(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry);
+
+        bool predict(PACKET* packet);
+        void train(PACKET* packet);
 };
 
 #endif /* OFFCHIP_PRED_PERC_H */

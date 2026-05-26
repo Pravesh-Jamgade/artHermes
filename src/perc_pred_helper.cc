@@ -153,6 +153,41 @@ uint32_t process_LastNPCs(state_info_t *state, uint64_t metadata, int32_t hash_t
     return (hashed_val % weight_array_size);
 }
 
+uint32_t process_prev_ptwlvl(state_info_t *state, uint64_t metadata, int32_t hash_type, uint32_t weight_array_size)
+{
+    uint32_t raw = state->prev_ptw_level;
+    uint32_t val = folded_xor(state->vaddr, 2);
+    val = (val << 2) + raw;
+    val = HashZoo::getHash(hash_type, val);
+    return (val % weight_array_size);
+}
+
+uint32_t process_curr_ptwlvl(state_info_t *state, uint64_t metadata, int32_t hash_type, uint32_t weight_array_size)
+{
+    uint32_t raw = state->prev_ptw_level;
+    uint32_t val = folded_xor(state->vaddr, 2);
+    val = (val << 2) + raw;
+    val = HashZoo::getHash(hash_type, val);
+    return (val % weight_array_size);
+}
+
+uint32_t process_walk_offchip(state_info_t *state, uint64_t metadata, int32_t hash_type, uint32_t weight_array_size)
+{
+    uint32_t raw = state->prev_ptw_offchip;
+    uint32_t val = folded_xor(state->vaddr, 2);
+    val = (val << 1) + raw;
+    val = HashZoo::getHash(hash_type, val);
+    return (val % weight_array_size);
+}
+
+uint32_t process_prefix_addr(state_info_t *state, uint64_t metadata, int32_t hash_type, uint32_t weight_array_size)
+{
+    uint64_t raw = state->prefix_vaddr;
+    uint32_t val = folded_xor(raw, 2);
+    val = HashZoo::getHash(hash_type, val);
+    return (val % weight_array_size);
+}
+
 uint32_t perceptron_pred_t::generate_index_from_feature(feature_type_t feature, state_info_t *state, uint64_t metadata, int32_t hash_type, uint32_t weight_array_size)
 {
     if(state == NULL) return 0;
@@ -177,6 +212,11 @@ uint32_t perceptron_pred_t::generate_index_from_feature(feature_type_t feature, 
         case feature_type_t::PC_CLDWordOffset:      return process_PC_CLDWordOffset(state, metadata, hash_type, weight_array_size);
         case feature_type_t::LastNLoadPCs:          return process_LastNLoadPCs(state, metadata, hash_type, weight_array_size);
         case feature_type_t::LastNPCs:              return process_LastNPCs(state, metadata, hash_type, weight_array_size);
+        // extras
+        case feature_type_t::CURR_PTW_LEVEL:        return process_curr_ptwlvl(state, metadata, hash_type, weight_array_size);
+        case feature_type_t::PREV_PTW_LEVEL:        return process_prev_ptwlvl(state, metadata, hash_type, weight_array_size);
+        case feature_type_t::PREV_WALK_OFFCHIP:     return process_walk_offchip(state, metadata, hash_type, weight_array_size);
+        case feature_type_t::PREFIX_ADDR:           return process_prefix_addr(state, metadata, hash_type, weight_array_size);
         default:                                    assert(false);
     }
 

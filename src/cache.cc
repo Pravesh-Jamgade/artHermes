@@ -1147,7 +1147,7 @@ void CACHE::handle_read()
                                 lower_level->add_rq(&rq_entry);
 
                                 // pravesh
-                                record_offchip_event(read_cpu, rq_entry);
+                                record_offchip_event(read_cpu, &rq_entry);
                                 
                                 // @RBERA: if this is a data load missing LLC, then:
                                 // 1. Monitor the position of the load in ROB
@@ -2373,8 +2373,11 @@ void CACHE::return_data(PACKET *packet)
     MSHR.entry[mshr_index].returned = COMPLETED;
     MSHR.entry[mshr_index].data = packet->data;
     MSHR.entry[mshr_index].pf_metadata = packet->pf_metadata;
+
+    // pravesh
     MSHR.entry[mshr_index].hit_where = packet->hit_where;
     MSHR.entry[mshr_index].pwc_miss_mem_hitwhere = packet->pwc_miss_mem_hitwhere;
+    MSHR.entry[mshr_index].went_offchip = packet->went_offchip;
 
     // ADD LATENCY
     if (MSHR.entry[mshr_index].event_cycle < current_core_cycle[packet->cpu])
@@ -2699,16 +2702,18 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
     return hit_where_t::INV;
 }
 
-void CACHE::record_offchip_event(uint32_t cpu, PACKET packet)
+void CACHE::record_offchip_event(uint32_t cpu, PACKET* packet)
 {
-    uint32_t lq_index = packet.lq_index;
-    if(packet.type == LOAD)
+    uint32_t lq_index = packet->lq_index;
+    if(packet->type == LOAD)
     {
-        ooo_cpu[cpu].ROB.entry[packet.rob_index].data_went_offchip = 1; // mark in ROB as well
+        ooo_cpu[cpu].ROB.entry[packet->rob_index].data_went_offchip = 1; // mark in ROB as well
     }
-    else if(packet.type == TRANSLATION)
+    else if(packet->type == TRANSLATION)
     {
-        ooo_cpu[cpu].ROB.entry[packet.rob_index].translation_went_offchip = 1; // mark in ROB as well
+        ooo_cpu[cpu].ROB.entry[packet->rob_index].translation_went_offchip = 1; // mark in ROB as well
+
+        packet->went_offchip = 1; // also mark in the packet for prefetcher feedback
     }
 }
 

@@ -30,6 +30,11 @@ typedef enum
     LastNLoadPCs,               // 16
     LastNPCs,                   // 17
 
+    CURR_PTW_LEVEL,              // 18
+    PREV_PTW_LEVEL,              // 19
+    PREV_WALK_OFFCHIP,          // 20
+    PREFIX_ADDR,                // 21
+
     num_feature_types
 } feature_type_t;
 
@@ -49,6 +54,11 @@ struct state_info_t
     uint32_t v_cl_word_offset;
     uint32_t v_cl_dword_offset;
 
+    uint32_t current_ptw_level;
+    uint32_t prev_ptw_level;
+    bool prev_ptw_offchip;
+    uint64_t prefix_vaddr;
+
     state_info_t()
     {
         pc = 0;
@@ -62,6 +72,11 @@ struct state_info_t
         v_cl_offset = 0;
         v_cl_word_offset = 0;
         v_cl_dword_offset = 0;
+
+        current_ptw_level = 0;
+        prev_ptw_level = 0;
+        prev_ptw_offchip = false;
+        prefix_vaddr = 0;
     }
 
     string to_string();

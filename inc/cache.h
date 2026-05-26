@@ -309,7 +309,7 @@ class CACHE : public MEMORY {
     hit_where_t assign_hit_where(uint8_t cache_type, uint32_t where_in_cache);
     void send_signal_to_core(uint32_t cpu, PACKET packet);
 
-    void record_offchip_event(uint32_t cpu, PACKET packet);
+    void record_offchip_event(uint32_t cpu, PACKET* packet);
         
     bool search_and_add(uint64_t page);
    

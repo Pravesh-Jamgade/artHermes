@@ -90,6 +90,13 @@ void OffchipPredPerc::dump_stats()
          << "ocp_perc_act_thresh_update_decrement " << stats.act_thresh_update.decrement << endl
          << "ocp_perc_act_thresh_update_max_observed_thresh " << stats.act_thresh_update.max_observed_thresh << endl
          << "ocp_perc_act_thresh_update_min_observed_thresh " << stats.act_thresh_update.min_observed_thresh << endl
+         << endl
+         << "PTW_ocp_perc_true_pos " << true_pos << endl
+         << "PTW_ocp_perc_false_pos " << false_pos << endl
+         << "PTW_ocp_perc_false_neg " << false_neg << endl
+         << "PTW_ocp_perc_true_neg " << true_neg << endl
+         << "PTW_precision " << ((true_pos + false_pos) > 0 ? (float)true_pos / (true_pos + false_pos) : 0) << endl
+         << "PTW_recall " << ((true_pos + false_neg) > 0 ? (float)true_pos / (true_pos + false_neg) : 0) << endl 
          << endl;
 
     perc_pred->dump_stats();
@@ -139,28 +146,7 @@ OffchipPredPerc::~OffchipPredPerc()
 
 }
 
-bool OffchipPredPerc::predict(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry)
-{
-    state_info_t *info = get_state(arch_instr, data_index, lq_entry);
-    float perc_weight_sum = 0.0;
-    bool prediction = false;
-
-    // get prediction
-    perc_pred->predict(info, prediction, perc_weight_sum);
-
-    // save all necessary data that would 
-    // later be required for training in LQ entry
-    ocp_perc_feature_t *feature = new ocp_perc_feature_t();
-    feature->info = info;
-    feature->perc_weight_sum = perc_weight_sum;
-    lq_entry->ocp_feature = feature;
-
-    stats.predict.called++;
-    stats.predict.outcome[prediction]++;
-
-    return prediction;
-}
-
+// ooo_model_instr: not used at all. lq_entry needs to get feature and state info and predicted bit. upto us feature could be stored elsewhere.
 void OffchipPredPerc::train(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry)
 {
     train_count++;
@@ -356,5 +342,163 @@ void OffchipPredPerc::check_and_update_act_thresh()
     else
     {
         MYLOG(warmup_complete[cpu], "act_same dram_bw: %d true_pos: %ld false_pos: %ld false_neg: %ld true_neg: %ld precision: %f recall: %f", +dram_bw, true_pos, false_pos, false_neg, true_neg, precision, recall);
+    }
+}
+
+// ooo_model_instr: get_state() needs ip, vaddr. get_control_flow_signatures() needs rob_index from lq_entry. upto us feature could be stored elsewhere
+bool OffchipPredPerc::predict(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry)
+{
+    state_info_t *info = get_state(arch_instr, data_index, lq_entry);
+    float perc_weight_sum = 0.0;
+    bool prediction = false;
+
+    // get prediction
+    perc_pred->predict(info, prediction, perc_weight_sum);
+
+    // save all necessary data that would 
+    // later be required for training in LQ entry
+    ocp_perc_feature_t *feature = new ocp_perc_feature_t();
+    feature->info = info;
+    feature->perc_weight_sum = perc_weight_sum;
+    lq_entry->ocp_feature = feature;
+
+    stats.predict.called++;
+    stats.predict.outcome[prediction]++;
+
+    return prediction;
+}
+
+
+// ================================================================================================
+
+// get features from state, get prediction, save features to refer again
+bool OffchipPredPerc::predict(PACKET* packet)
+{
+    bool prediction = false;
+    state_info_t *info = get_state(packet);
+    float perc_weight_sum = 0.0;
+
+    // get prediction
+    perc_pred->predict(info, prediction, perc_weight_sum);
+
+    // save all necessary data that would 
+    // later be required for training in LQ entry
+    ocp_perc_feature_t *feature = new ocp_perc_feature_t();
+    feature->info = info;
+    feature->perc_weight_sum = perc_weight_sum;
+    packet->ocp_feature = feature;
+    packet->went_offchip_pred = prediction;
+
+    stats.predict.called++;
+    stats.predict.outcome[prediction]++;
+    return prediction;
+}
+
+void OffchipPredPerc::train(PACKET* packet)
+{
+    train_count++;
+
+    // keep track of true/false positives/negatives
+    if(packet->went_offchip_pred && packet->went_offchip)           true_pos++;
+    else if(packet->went_offchip_pred && !packet->went_offchip)     false_pos++;
+    else if(!packet->went_offchip_pred && packet->went_offchip)     false_neg++;
+    else if(!packet->went_offchip_pred && !packet->went_offchip)    true_neg++;
+
+    // check if an update to activation threshold is needed
+    if(knob::ocp_perc_enable_dynamic_act_thresh && train_count % knob::ocp_perc_update_act_thresh_epoch == 0)
+    {
+        check_and_update_act_thresh();
+    }
+
+    // retreive all necessary data from LQ entry
+    // that were used before for prediction making
+    ocp_perc_feature_t *feature = (ocp_perc_feature_t*)packet->ocp_feature;
+    state_info_t *info = feature->info;
+    float perc_weight_sum = feature->perc_weight_sum;
+
+    // train perceptron
+    perc_pred->train(info, perc_weight_sum, packet->went_offchip_pred, packet->went_offchip);
+
+    stats.train.called++;
+}
+
+// Dealing with PTW packets
+state_info_t* OffchipPredPerc::get_state(PACKET* packet)
+{
+    uint64_t load_pc = packet->ip;
+    uint64_t paddr = packet->full_addr; // physical address
+    uint64_t ppage = paddr >> LOG2_PAGE_SIZE;
+    uint32_t poffset = (paddr >> LOG2_BLOCK_SIZE) & ((1ull << (LOG2_PAGE_SIZE - LOG2_BLOCK_SIZE)) - 1);
+    uint32_t p_cl_offset = paddr & ((1ull << LOG2_BLOCK_SIZE) - 1);
+    uint32_t p_cl_word_offset = p_cl_offset >> 2;
+    uint32_t p_cl_dword_offset = p_cl_offset >> 4;
+
+    state_info_t *info = new state_info_t();
+
+    // get control-flow features
+    uint64_t last_n_load_pc_sig = 0, last_n_pc_sig = 0;
+    get_control_flow_signatures(packet, last_n_load_pc_sig, last_n_pc_sig);
+
+    // get data-flow features
+    bool first_access = false;
+    lookup_address(paddr, ppage, poffset, first_access);
+
+    // populate features
+    info->pc = load_pc;
+    info->last_n_load_pc_sig = last_n_load_pc_sig;
+    info->last_n_pc_sig = last_n_pc_sig;
+    info->data_index = packet->data_index;
+    info->vaddr = paddr;
+    info->vpage = ppage;
+    info->voffset = poffset;
+    info->first_access = first_access;
+    info->v_cl_offset = p_cl_offset;
+    info->v_cl_word_offset = p_cl_word_offset;
+    info->v_cl_dword_offset = p_cl_dword_offset;
+
+    // adding extras
+    info->current_ptw_level = packet->ptw_level;
+    info->prev_ptw_level = packet->ptw_level;
+    // get prev-level hit on/off-chip signal
+    info->prev_ptw_offchip = ((packet->pwc_miss_mem_hitwhere >> ((packet->ptw_level+1)*5)) & 0x1f) == hit_where_t::DRAM;
+    // prefix address till this level
+    info->prefix_vaddr = packet->virt_addr >> ((packet->ptw_level*(9)) + LOG2_PAGE_SIZE);
+
+    return info;
+}
+
+void OffchipPredPerc::get_control_flow_signatures(PACKET* packet, uint64_t &last_n_load_pc_sig, uint64_t &last_n_pc_sig)
+{
+    // signature from last N load PCs
+    uint64_t curr_pc = packet->ip;
+    if(last_n_load_pcs.size() >= knob::ocp_perc_last_n_load_pcs)
+    {
+        last_n_load_pcs.pop_front();
+    }
+    last_n_load_pcs.push_back(curr_pc);
+
+    last_n_load_pc_sig = 0;
+    for(uint32_t index = 0; index < last_n_load_pcs.size(); ++index)
+    {
+        last_n_load_pc_sig <<= 1;
+        last_n_load_pc_sig ^= last_n_load_pcs[index];
+    }
+
+    // signature from last N instruction PCs
+    deque<uint64_t> last_n_pcs;
+    int prior = packet->rob_index;
+    for(int i = 0; i < (int)knob::ocp_perc_last_n_pcs-1; ++i)
+    {
+        last_n_pcs.push_front(ooo_cpu[cpu].ROB.entry[prior].ip);
+        prior--;
+        if(prior < 0)
+            prior = ooo_cpu[cpu].ROB.SIZE - 1;
+    }
+
+    last_n_pc_sig = 0;
+    for(uint32_t index = 0; index < last_n_pcs.size(); ++index)
+    {
+        last_n_pc_sig <<= 1;
+        last_n_pc_sig ^= last_n_pcs[index];
     }
 }

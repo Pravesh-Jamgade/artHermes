@@ -10,6 +10,8 @@
 #include <iomanip>
 #include <cstring>
 #include "const.h"
+#include "offchip_pred_base.h"
+#include "offchip_pred_perc.h"
 
 static const uint64_t CR3_STRIDE_100GB = (100ULL * 1024ULL * 1024ULL * 1024ULL);
 
@@ -33,10 +35,12 @@ PTWclass::PTWclass(uint32_t cpu_id)
 
     memset(&stats, 0, sizeof(stats));
     initialize();
+    trans_offchip_pred = new OffchipPredPerc(cpu_id, "PTW_OffchipPredPerc", champsim_seed);
 }
 
 // Destructor
 PTWclass::~PTWclass() {
+    trans_offchip_pred->dump_stats();
     print_stats();
 }
 
@@ -322,7 +326,34 @@ void PTWclass::operate() {
                 req.from_ptw     = 1;
                 req.ptw_level    = curr_lvl;
                 req.ptw_walk_ptr = (void *)&mshr[mshr_idx];
-                req.ip          = walk.packet.ip;
+                
+                // required by perceptron 
+                req.ip            = walk.packet.ip;
+                req.data_index    = walk.packet.data_index;
+                req.rob_index     = walk.packet.rob_index;
+                req.lq_index      = walk.packet.lq_index;
+                req.pwc_miss_mem_hitwhere = walk.packet.pwc_miss_mem_hitwhere; // to set prev-walk on/off-chip features for perceptron
+
+                trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
+
+                if(req.went_offchip_pred)
+                {
+                    PACKET offchip_req = req; // copy by value since req will be modified for on-chip dispatch below
+                    offchip_req.fill_level = FILL_DDRP;
+                    offchip_req.fill_l1d = 0;
+                    offchip_req.type = PREFETCH;
+
+                    stats.ddrp_stat.ddrp_offchip_calls++;
+                    if(ooo_cpu[cpu].dram_controller->get_occupancy(1, offchip_req.full_addr >> LOG2_BLOCK_SIZE) == ooo_cpu[cpu].dram_controller->get_size(1, offchip_req.full_addr >> LOG2_BLOCK_SIZE))
+                    {
+                        stats.ddrp_stat.ddrp_offchip_stalled++;
+                    }
+                    else 
+                    {
+                        stats.ddrp_stat.ddrp_offchip_sent++;
+                        ooo_cpu[cpu].dram_controller->add_rq(&offchip_req);
+                    }
+                }
 
                 int status = ooo_cpu[cpu].L1D.add_rq(&req);
                 if (status == -2) {
@@ -415,6 +446,9 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     else if (packet->hit_where >= hit_where_t::LLC && packet->hit_where <= hit_where_t::LLC_MSHR) { hit_src = hit_where_t::LLC; stats.level_stats[lvl].llc_hits++; }
     else if (packet->hit_where == hit_where_t::DRAM)                                             { hit_src = hit_where_t::DRAM; stats.level_stats[lvl].dram_hits++; }
     
+    // train
+    trans_offchip_pred->train(packet);
+
     if (lvl >= 0) {
 
         // More levels to walk: push a new OutstandingWalk for the next level.
@@ -544,6 +578,8 @@ void PTWclass::print_config() {
 
 // Print statistics
 void PTWclass::print_stats() {
+
+    cout << endl;
     auto printScalar = [&](const string &name, uint64_t value) {
         cout << "PTW," << cpu << "," << name << "," << value << "\n";
     };
@@ -590,5 +626,13 @@ void PTWclass::print_stats() {
              << "," << stats.level_stats[lvl].llc_hits
              << "," << stats.level_stats[lvl].dram_hits
              << "\n";
+
+        cout << '\n';
+        cout << "Predictor," << cpu << "," << pfx << "offchip_pred, calls, sent, stalled\n";
+        cout << "Predictor," << cpu << "," << pfx << "offchip_pred"
+             << "," << stats.ddrp_stat.ddrp_offchip_calls
+             << "," << stats.ddrp_stat.ddrp_offchip_sent
+             << "," << stats.ddrp_stat.ddrp_offchip_stalled
+             << "\n";   
     }
 }

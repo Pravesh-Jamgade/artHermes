@@ -178,6 +178,10 @@ class PACKET {
     uint32_t doa_pred_bit; // Deadblock pred: LLC perceptron prediction (0=unset, 1=predicted hit, 2=predicted miss)
     uint32_t pwc_miss_mem_hitwhere; // PWC miss memory hit_where: 5 bits per level, lvl0=bits0-4,...
 
+    // not best way
+    ocp_base_feature_t *ocp_feature;
+    bool went_offchip; 
+
     PACKET() {
         id = next_id++;
 
@@ -253,6 +257,9 @@ class PACKET {
         from_ptw = 0;
         ptw_level = 0;
         ptw_walk_ptr = NULL;
+        
+        ocp_feature = NULL;
+        went_offchip = false;
     };
     std::string to_string();
 };

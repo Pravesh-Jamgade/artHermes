@@ -205,7 +205,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         // evicting another page) before we can return the translation result. This models the latency of 
         // handling a page fault for a translation request.
         {
-            if (queue->entry[index].type == TRANSLATION) 
+            if (queue->entry[index].type == TRANSLATION || (queue->entry[index].type == PREFETCH && queue->entry[index].fill_level==FILL_DDRP) )
             {
                 // check if page table has entry allocated in DRAM
                 uint64_t req_pte_addr = queue->entry[index].full_addr;
@@ -481,32 +481,33 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         return_data_to_core = false;
     }
 
+    if (packet->type == TRANSLATION || (packet->type == PREFETCH && packet->fill_level==FILL_DDRP)) {
+        // check if page table has entry allocated in DRAM
+        uint64_t req_pte_addr = packet->full_addr;
+        uint64_t pte_data = 0;
+        bool is_pf = false;
+        bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
+
+        // real allocation — let buddy allocator pick any free physical page
+        if (is_pf) {
+            pte_data = buddy_allocator.access();
+            // Store into shadow and clear page_fault so future cache hits return correct value.
+            buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data);
+        }
+        
+        if(packet->ptw_level == 0)
+        {
+            buddy_allocator.map_vpage_to_pframe(packet->virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
+        }
+
+        // return pte value to cache hierarchy
+        packet->data = pte_data;
+    }
+
+
     // simply return read requests with dummy response before the warmup
     if (all_warmup_complete < NUM_CPUS && return_data_to_core) 
     {
-        if (packet->type == TRANSLATION) {
-            // check if page table has entry allocated in DRAM
-            uint64_t req_pte_addr = packet->full_addr;
-            uint64_t pte_data = 0;
-            bool is_pf = false;
-            bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
-
-            // real allocation — let buddy allocator pick any free physical page
-            if (is_pf) {
-                pte_data = buddy_allocator.access();
-                // Store into shadow and clear page_fault so future cache hits return correct value.
-                buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data);
-            }
-            
-            if(packet->ptw_level == 0)
-            {
-                buddy_allocator.map_vpage_to_pframe(packet->virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
-            }
-
-            // return pte value to cache hierarchy
-            packet->data = pte_data;
-        }
-
         if (packet->instruction) 
             upper_level_icache[packet->cpu]->return_data(packet);
         if (packet->is_data)

@@ -40,7 +40,12 @@ string feature_names[] = {
     "CLDWordOffset",
     "PC_CLDWordOffset",
     "LastNLoadPCs",
-    "LastNPCs"
+    "LastNPCs",
+
+    "curr_ptw_level",              
+    "prev_ptw_level",              
+    "prev_walk_offchip",        
+    "prefix_addr"               
 };
 
 string state_info_t::to_string()
