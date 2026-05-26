@@ -17,6 +17,10 @@ static const uint64_t CR3_STRIDE_100GB = (100ULL * 1024ULL * 1024ULL * 1024ULL);
 
 using namespace std;
 
+namespace knob{
+    extern bool enable_translation_ocp;
+};
+
 // Constructor
 PTWclass::PTWclass(uint32_t cpu_id) 
     : cpu(cpu_id),
@@ -336,7 +340,7 @@ void PTWclass::operate() {
 
                 trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
 
-                if(req.went_offchip_pred)
+                if(req.went_offchip_pred && knob::enable_translation_ocp)
                 {
                     PACKET offchip_req = req; // copy by value since req will be modified for on-chip dispatch below
                     offchip_req.fill_level = FILL_DDRP;

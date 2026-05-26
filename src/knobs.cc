@@ -429,6 +429,9 @@ namespace knob
 	uint32_t window_size = 50000000;
 	float sleep_frac = 0.25;
 
+	// translation ocp predictor
+	bool enable_translation_ocp = false;
+
 	// When true: instruction-side translation is resolved via the buddy allocator
 	// at zero latency (no ITLB/STLB/PTW cost).  When false: instructions go
 	// through the real ITLB → STLB → PTW pipeline.
@@ -1872,7 +1875,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	{
 		knob::ocp_ttp_enable_track_llc_eviction = !strcmp(value, "true") ? true : false;
 	}
-
+	else if(MATCH("", "enable_translation_ocp"))
+	{
+		knob::enable_translation_ocp = !strcmp(value, "true") ? true : false;
+	}
 	// Direcr DRAM Prefetch (DDRP)
 	else if (MATCH("", "enable_ddrp"))
 	{
