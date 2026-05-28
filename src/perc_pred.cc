@@ -144,6 +144,7 @@ void perceptron_pred_t::predict(state_info_t *state, bool &prediction, float &pe
         stats.predict.pred_false++;
 }
 
+// we try to move towards true_output, based on that we do (true_ouput=T)increment or (true_output=F)decrement of weight.
 void perceptron_pred_t::train(state_info_t *state, float perc_weight_sum, bool pred_output, bool true_output)
 {
     stats.train.called++;
@@ -155,6 +156,7 @@ void perceptron_pred_t::train(state_info_t *state, float perc_weight_sum, bool p
 
     if(true_output == true)
     {
+        // True Positive
         if(pred_output == true_output)
         {
             // correctly predicted true
@@ -169,6 +171,7 @@ void perceptron_pred_t::train(state_info_t *state, float perc_weight_sum, bool p
                 MYLOG(warmup_complete[cpu], "correct_pred::true perc_sum_weight already saturated ...");
             }
         }
+        // False Negative
         else
         {
             // should have predicted true, but actually predicted false
@@ -179,6 +182,7 @@ void perceptron_pred_t::train(state_info_t *state, float perc_weight_sum, bool p
     }
     else
     {
+        // True Negative
         if(pred_output == true_output)
         {
             // correctly predicted false
@@ -193,6 +197,7 @@ void perceptron_pred_t::train(state_info_t *state, float perc_weight_sum, bool p
                 MYLOG(warmup_complete[cpu], "correct_pred::false perc_sum_weight already saturated ...");
             }
         }
+        // False Positive
         else
         {
             // should have predicted false, but actually predicted true

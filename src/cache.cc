@@ -1141,13 +1141,15 @@ void CACHE::handle_read()
                         else
                         {
                             rq_entry.hit_where = hit_where_t::DRAM; // LLC miss => DRAM hit
+                            if(lower_level)
+                            {
+                                // pravesh
+                                record_offchip_event(read_cpu, &rq_entry);
+                            }
                             add_mshr(&rq_entry);
                             if(lower_level)
                             {
                                 lower_level->add_rq(&rq_entry);
-
-                                // pravesh
-                                record_offchip_event(read_cpu, &rq_entry);
                                 
                                 // @RBERA: if this is a data load missing LLC, then:
                                 // 1. Monitor the position of the load in ROB
@@ -1838,6 +1840,51 @@ int CACHE::check_hit(PACKET *packet)
     }
 
     return match_way;
+}
+
+bool CACHE::free_lookup(PACKET *packet)
+{
+    bool hit = false;
+    // 1. Check hit in cache block array
+    uint32_t set = get_set(packet->address);
+    for (uint32_t way = 0; way < NUM_WAY; way++) {
+        if (block[set][way].valid && (block[set][way].tag == packet->address)) {
+            hit = true;
+            break;
+        }
+    }
+
+    // Apply shadow page table page fault override (similar to handle_read)
+    if (hit && knob::enable_ptw && packet->type == TRANSLATION && packet->from_ptw) {
+        uint64_t shadow_val;
+        bool is_pf = false;
+        if (buddy_allocator.shadow_get_entry(packet->full_addr, (uint8_t)packet->ptw_level, shadow_val, is_pf) && is_pf) {
+            hit = false; // forced miss due to page fault
+        }
+    }
+
+    // 2. Check WQ (Write Queue)
+    if (!hit) {
+        if (WQ.check_queue(packet) != -1) {
+            hit = true;
+        }
+    }
+
+    // 3. Check RQ (Read Queue)
+    if (!hit && RQ) {
+        if (RQ->check_queue(packet) != -1) {
+            hit = true;
+        }
+    }
+
+    // 4. Check MSHR (Miss Status Holding Register)
+    if (!hit) {
+        if (check_mshr(packet) != -1) {
+            hit = true;
+        }
+    }
+
+    return hit;
 }
 
 // =====================================================================

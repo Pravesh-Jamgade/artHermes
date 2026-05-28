@@ -431,12 +431,39 @@ namespace knob
 
 	// translation ocp predictor
 	bool enable_translation_ocp = false;
+	// oracle which knows whether data is on/off-chip
+	bool enable_oracle_ptw_pred = false;
 
 	// When true: instruction-side translation is resolved via the buddy allocator
 	// at zero latency (no ITLB/STLB/PTW cost).  When false: instructions go
 	// through the real ITLB → STLB → PTW pipeline.
 	bool itlb_oracle_translation = false;
 
+}
+
+std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
+
+int parse_knobs_tracker(void* user, const char* section, const char* name, const char* value)
+{
+	int result = parse_knobs(user, section, name, value);
+	if (result != 0)
+	{
+		bool found = false;
+		for (auto &setting : tracked_explicit_settings)
+		{
+			if (setting.first == name)
+			{
+				setting.second = value;
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+		{
+			tracked_explicit_settings.push_back({name, value});
+		}
+	}
+	return result;
 }
 
 void parse_args(int argc, char *argv[])
@@ -462,12 +489,13 @@ int handler(void* user, const char* section, const char* name, const char* value
 
 	if(MATCH("", "config"))
 	{
+		tracked_explicit_settings.push_back({name, value});
 		strcpy(config_file_name, value);
 		parse_config(config_file_name);
 	}
 	else
 	{
-		parse_knobs(user, section, name, value);
+		parse_knobs_tracker(user, section, name, value);
 	}
 	return 1;
 }
@@ -475,7 +503,7 @@ int handler(void* user, const char* section, const char* name, const char* value
 void parse_config(char *config_file_name)
 {
 	cout << "parsing config file: " << string(config_file_name) << endl;
-	if (ini_parse(config_file_name, parse_knobs, NULL) < 0)
+	if (ini_parse(config_file_name, parse_knobs_tracker, NULL) < 0)
 	{
         printf("Failed to load %s\n", config_file_name);
         exit(1);
@@ -1878,6 +1906,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if(MATCH("", "enable_translation_ocp"))
 	{
 		knob::enable_translation_ocp = !strcmp(value, "true") ? true : false;
+	}
+	else if(MATCH("", "enable_oracle_ptw_pred"))
+	{
+		knob::enable_oracle_ptw_pred = !strcmp(value, "true") ? true : false;
 	}
 	// Direcr DRAM Prefetch (DDRP)
 	else if (MATCH("", "enable_ddrp"))

@@ -3,7 +3,12 @@
 
 #include <vector>
 #include <cstdint>
+#include <string>
+#include <utility>
 #define MAX_LEN 256
+
+extern std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
+int parse_knobs_tracker(void* user, const char* section, const char* name, const char* value);
 
 void parse_args(int argc, char* argv[]);
 void parse_config(char *config_file_name);

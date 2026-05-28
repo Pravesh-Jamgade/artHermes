@@ -243,6 +243,8 @@ class CACHE : public MEMORY {
     void return_data(PACKET *packet),
          operate(),
          increment_WQ_FULL(uint64_t address);
+    
+    bool  free_lookup(PACKET *packet);
 
     uint32_t get_occupancy(uint8_t queue_type, uint64_t address),
              get_size(uint8_t queue_type, uint64_t address);

@@ -107,6 +107,17 @@ string type_names[NUM_TYPES] = {"load", "RFO", "prefetch", "writeback"};
 
 void print_knobs()
 {
+    cout << "----------------------------------------------------------" << endl;
+    cout << "Explicitly set configuration settings (via config file or command line):" << endl;
+    if (tracked_explicit_settings.empty()) {
+        cout << "  (none)" << endl;
+    } else {
+        for (const auto& setting : tracked_explicit_settings) {
+            cout << "  " << setting.first << " = " << setting.second << endl;
+        }
+    }
+    cout << "----------------------------------------------------------" << endl << endl;
+
     cout << "warmup_instructions " << knob::warmup_instructions << endl
         << "simulation_instructions " << knob::simulation_instructions << endl
         << "champsim_seed " << champsim_seed << endl
@@ -1682,6 +1693,10 @@ int main(int argc, char** argv)
         major_fault[i] = 0;
 
         ooo_cpu[i].interval_counter = new IWCounter(knob::window_size, knob::sleep_frac);
+        // Pravesh: for free lookup in page table walker: oracle
+        ooo_cpu[i].page_table_walker->l1d = &ooo_cpu[i].L1D;
+        ooo_cpu[i].page_table_walker->l2 = &ooo_cpu[i].L2C;
+        ooo_cpu[i].page_table_walker->llc = &uncore.LLC;
     }
 
     uncore.LLC.llc_initialize_replacement();

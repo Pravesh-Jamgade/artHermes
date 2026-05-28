@@ -74,7 +74,7 @@ void OffchipPredPerc::print_config()
 
 void OffchipPredPerc::dump_stats()
 {
-    cout << "ocp_perc_train_called " << stats.train.called << endl
+    cout << "\nocp_perc_train_called " << stats.train.called << endl
          << "ocp_perc_predict_called " << stats.predict.called << endl
          << "ocp_perc_predict_offchip " << stats.predict.outcome[1] << endl
          << "ocp_perc_predict_not_offchip " << stats.predict.outcome[0] << endl
@@ -91,12 +91,12 @@ void OffchipPredPerc::dump_stats()
          << "ocp_perc_act_thresh_update_max_observed_thresh " << stats.act_thresh_update.max_observed_thresh << endl
          << "ocp_perc_act_thresh_update_min_observed_thresh " << stats.act_thresh_update.min_observed_thresh << endl
          << endl
-         << "PTW_ocp_perc_true_pos " << true_pos << endl
-         << "PTW_ocp_perc_false_pos " << false_pos << endl
-         << "PTW_ocp_perc_false_neg " << false_neg << endl
-         << "PTW_ocp_perc_true_neg " << true_neg << endl
-         << "PTW_precision " << ((true_pos + false_pos) > 0 ? (float)true_pos / (true_pos + false_pos) : 0) << endl
-         << "PTW_recall " << ((true_pos + false_neg) > 0 ? (float)true_pos / (true_pos + false_neg) : 0) << endl 
+         << "ocp_perc_true_pos " << true_pos << endl
+         << "ocp_perc_false_pos " << false_pos << endl
+         << "ocp_perc_false_neg " << false_neg << endl
+         << "ocp_perc_true_neg " << true_neg << endl
+         << "precision " << ((true_pos + false_pos) > 0 ? (float)true_pos / (true_pos + false_pos) : 0) << endl
+         << "recall " << ((true_pos + false_neg) > 0 ? (float)true_pos / (true_pos + false_neg) : 0) << endl 
          << endl;
 
     perc_pred->dump_stats();
@@ -413,6 +413,7 @@ void OffchipPredPerc::train(PACKET* packet)
     // retreive all necessary data from LQ entry
     // that were used before for prediction making
     ocp_perc_feature_t *feature = (ocp_perc_feature_t*)packet->ocp_feature;
+    assert(feature != nullptr);
     state_info_t *info = feature->info;
     float perc_weight_sum = feature->perc_weight_sum;
 
