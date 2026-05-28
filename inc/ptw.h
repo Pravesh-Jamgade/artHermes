@@ -110,11 +110,12 @@ public:
         uint64_t requested_cycle;
         uint32_t instr_id;
         PACKET   packet;         // original STLB packet, copied by value
+        PACKET*   feature_packet;    // this is sent packet for obataining next address, it has feature and went_offchip_pred populated by predictor, used for stats
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
         PTW_MSHR_Entry() : valid(false), piggyback(false), vaddr(0), current_level(0),
                            current_pte_addr(0), table_base_pa(0),
-                           requested_cycle(0), instr_id(0), total_page_faults(0) {}
+                           requested_cycle(0), instr_id(0), total_page_faults(0), feature_packet(nullptr) {}
     };
 
     std::deque<OutstandingWalk> outstanding_walks;

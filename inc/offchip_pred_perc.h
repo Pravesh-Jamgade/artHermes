@@ -113,6 +113,7 @@ class OffchipPredPerc : public OffchipPredBase
 
         bool predict(PACKET* packet);
         void train(PACKET* packet);
+        void set_state_info(PACKET* packet);
 };
 
 #endif /* OFFCHIP_PRED_PERC_H */

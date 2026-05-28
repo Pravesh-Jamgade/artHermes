@@ -467,6 +467,20 @@ state_info_t* OffchipPredPerc::get_state(PACKET* packet)
     return info;
 }
 
+void OffchipPredPerc::set_state_info(PACKET* packet)
+{
+    // This function is needed to set the state info for PTW packets that are not predicted to go offchip and hence not trained upon yet. 
+    // For these packets, we still want to set the state info so that when they do get trained upon (e.g., due to a later misprediction), we have the necessary info ready.
+    if(packet->ocp_feature == NULL)
+    {
+        state_info_t *info = get_state(packet);
+        ocp_perc_feature_t *feature = new ocp_perc_feature_t();
+        feature->info = info;
+        feature->perc_weight_sum = 0.0; // this value won't be used since these packets won't be trained upon until they are mispredicted, but we set it to 0.0 for completeness
+        packet->ocp_feature = feature;
+    }
+}
+
 void OffchipPredPerc::get_control_flow_signatures(PACKET* packet, uint64_t &last_n_load_pc_sig, uint64_t &last_n_pc_sig)
 {
     // signature from last N load PCs

@@ -313,33 +313,34 @@ void PTWclass::operate() {
                 }
             }
 
+            PACKET req;
+            memset(&req, 0, sizeof(req));
+            req.address      = pte_addr >> LOG2_BLOCK_SIZE;
+            req.full_addr    = pte_addr;
+            req.virt_addr    = walk.virt_full_addr;
+            req.cpu          = cpu;
+            req.is_data      = 1;
+            req.type         = TRANSLATION;
+            req.instruction  = 0;
+            req.tlb_access   = 1;
+            req.fill_level   = FILL_L1;
+            req.fill_l1d     = 1;
+            req.from_ptw     = 1;
+            req.ptw_level    = curr_lvl;
+            req.ptw_walk_ptr = (void *)&mshr[mshr_idx];
+            
+            // required by perceptron 
+            req.ip            = walk.packet.ip;
+            req.data_index    = walk.packet.data_index;
+            req.rob_index     = walk.packet.rob_index;
+            req.lq_index      = walk.packet.lq_index;
+            req.pwc_miss_mem_hitwhere = walk.packet.pwc_miss_mem_hitwhere; // to set prev-walk on/off-chip features for perceptron
+
+            bool prediction_made = trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
+
             if (!already_in_flight) {
                 // First walk for this cache block: dispatch a new TRANSLATION to L1D.
-                PACKET req;
-                memset(&req, 0, sizeof(req));
-                req.address      = pte_addr >> LOG2_BLOCK_SIZE;
-                req.full_addr    = pte_addr;
-                req.virt_addr    = walk.virt_full_addr;
-                req.cpu          = cpu;
-                req.is_data      = 1;
-                req.type         = TRANSLATION;
-                req.instruction  = 0;
-                req.tlb_access   = 1;
-                req.fill_level   = FILL_L1;
-                req.fill_l1d     = 1;
-                req.from_ptw     = 1;
-                req.ptw_level    = curr_lvl;
-                req.ptw_walk_ptr = (void *)&mshr[mshr_idx];
-                
-                // required by perceptron 
-                req.ip            = walk.packet.ip;
-                req.data_index    = walk.packet.data_index;
-                req.rob_index     = walk.packet.rob_index;
-                req.lq_index      = walk.packet.lq_index;
-                req.pwc_miss_mem_hitwhere = walk.packet.pwc_miss_mem_hitwhere; // to set prev-walk on/off-chip features for perceptron
-
-                trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
-
+    
                 if(req.went_offchip_pred && knob::enable_translation_ocp)
                 {
                     PACKET offchip_req = req; // copy by value since req will be modified for on-chip dispatch below
@@ -377,6 +378,8 @@ void PTWclass::operate() {
             mshr[mshr_idx].requested_cycle = walk.requested_cycle;
             mshr[mshr_idx].instr_id        = walk.instr_id;
             mshr[mshr_idx].packet          = walk.packet;
+            mshr[mshr_idx].feature_packet     = &req;
+
             for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
                 mshr[mshr_idx].level_stats[lv] = walk.level_stats[lv];
             mshr[mshr_idx].total_page_faults = walk.total_page_faults;
@@ -465,11 +468,14 @@ void PTWclass::handle_memory_response(PACKET *packet) {
                 || me->current_level != (int)lvl
                 || packet->address != me->current_pte_addr >> LOG2_BLOCK_SIZE)
                 continue;
-
-            // it will print consecutively for duplicates
+            
+            // merged accesses will also contribute to training
             if(me->piggyback)
             {
-             
+                // this is merged load, but kept separate mshr entry.
+                // the actual loads went_offchip value is used for traning
+                me->feature_packet->went_offchip = packet->went_offchip;
+                trans_offchip_pred->train(me->feature_packet);
                 debug.log("Return", "instr1", me->instr_id, "full_vaddr", hex2str(me->vaddr), "pte_addr_full", hex2str(me->current_pte_addr), "lvl", me->current_level, "hit_src", hit_src,
                           "instr2", packet->instr_id, "full_vaddr", hex2str(packet->virt_addr), "pte_addr_full", hex2str(packet->full_addr), "lvl", packet->ptw_level, '\n');
             }
