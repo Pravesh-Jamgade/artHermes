@@ -130,11 +130,15 @@ void BuddyAllocator::shadow_init_page(uint64_t page_key, uint8_t level)
     // Mark every entry as page_fault=true: the page has not been allocated yet.
     for (uint32_t b = 0; b < SHADOW_BLOCKS_PER_PAGE; b++)
         for (uint32_t e = 0; e < SHADOW_ENTRIES_PER_BLOCK; e++)
-            pg.blocks[b].entries[e].page_fault = true;
+            pg.blocks[b].entries[e].page_fault = PTEStatus::FAULT;
 }
 
 // Overwrite the shadow entry for the PTE at exact byte address pte_paddr.
-void BuddyAllocator::shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_t value)
+// Hack:::
+// Defaul PTEStatus pte_status = NO_FAULT, we are doing this to use intermediate state we 
+// needed for ddrp packet, since it was earlier setting NO_FAULT and regular request was
+// dicovering Hit even though that PTE was invalid earlier
+void BuddyAllocator::shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_t value, PTEStatus pte_status)
 {
     uint64_t page_key;
     uint32_t block_idx, entry_idx;
@@ -143,14 +147,19 @@ void BuddyAllocator::shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_
     auto it = shadow_pt[level].find(page_key);
     if (it != shadow_pt[level].end()) {
         it->second.blocks[block_idx].entries[entry_idx].value      = value;
-        it->second.blocks[block_idx].entries[entry_idx].page_fault = false; // explicit set = officially known
+        it->second.blocks[block_idx].entries[entry_idx].page_fault = pte_status; // explicit set = officially known
+        
+        std::string status_pf_entries = "";
+        for(auto entry: it->second.blocks[block_idx].entries){
+            status_pf_entries += std::to_string(entry.page_fault)+"_";
+        }
     }
     // If the page hasn't been initialised yet we silently drop the write;
     // shadow_init_page must be called first (done in ptw.cc operate()).
 }
 
 // Read the shadow entry for the PTE at exact byte address pte_paddr.
-// Returns true and sets 'value' and 'is_page_fault' if the page is tracked.
+// Returns true (found pte) and sets 'value' and 'is_page_fault' if the page is tracked.
 bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault) const
 {
     uint64_t page_key;
@@ -163,7 +172,8 @@ bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_
 
     const ShadowPTEntry &e = it->second.blocks[block_idx].entries[entry_idx];
     value        = e.value;
-    is_page_fault = e.page_fault;
+    is_page_fault = e.page_fault == PTEStatus::FAULT || e.page_fault == PTEStatus::DDRP_PROXY;
+
     return true;
 }
 
@@ -183,5 +193,21 @@ void BuddyAllocator::shadow_clear_page_fault(uint64_t pte_paddr, uint8_t level)
 
     auto it = shadow_pt[level].find(page_key);
     if (it != shadow_pt[level].end())
-        it->second.blocks[block_idx].entries[entry_idx].page_fault = false;
+        it->second.blocks[block_idx].entries[entry_idx].page_fault = PTEStatus::NO_FAULT;
+}
+
+std::string BuddyAllocator::debug_print_valid_block_entry(uint64_t pte_paddr, uint8_t level)
+{
+    uint64_t page_key;
+    uint32_t block_idx, entry_idx;
+    pte_addr_decompose(pte_paddr, page_key, block_idx, entry_idx);
+
+    std::string status_pf_entries = "";
+    auto it = shadow_pt[level].find(page_key);
+    if (it != shadow_pt[level].end()){
+        for(auto entry: it->second.blocks[block_idx].entries){
+            status_pf_entries += std::to_string(entry.page_fault)+"_";
+        }
+    }
+    return status_pf_entries;
 }

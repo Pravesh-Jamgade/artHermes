@@ -205,7 +205,8 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         // evicting another page) before we can return the translation result. This models the latency of 
         // handling a page fault for a translation request.
         {
-            if (queue->entry[index].type == TRANSLATION || (queue->entry[index].type == PREFETCH && queue->entry[index].fill_level==FILL_DDRP) )
+            bool ddrp_req = (queue->entry[index].type == PREFETCH && queue->entry[index].fill_level==FILL_DDRP);
+            if (queue->entry[index].type == TRANSLATION || ddrp_req)
             {
                 // check if page table has entry allocated in DRAM
                 uint64_t req_pte_addr = queue->entry[index].full_addr;
@@ -214,10 +215,16 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
 
                 // real allocation — let buddy allocator pick any free physical page
                 if (page_fault) {
+
+                    PTEStatus pte_status = PTEStatus::NO_FAULT;
+                    if(ddrp_req)
+                    {
+                        pte_status = PTEStatus::DDRP_PROXY;
+                    }
                     pte_data = buddy_allocator.access();
                     // Store into shadow and clear page_fault so future cache hits return correct value.
                     buddy_allocator.shadow_set_entry(req_pte_addr, 
-                                        (uint8_t)queue->entry[index].ptw_level, pte_data);
+                                        (uint8_t)queue->entry[index].ptw_level, pte_data, pte_status);
                 }
 
                 if(queue->entry[index].ptw_level == 0)
@@ -481,7 +488,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         return_data_to_core = false;
     }
 
-    if (packet->type == TRANSLATION || (packet->type == PREFETCH && packet->fill_level==FILL_DDRP)) {
+    bool ddrp_req = (packet->type == PREFETCH && packet->fill_level==FILL_DDRP);
+    if (packet->type == TRANSLATION || ddrp_req) {
         // check if page table has entry allocated in DRAM
         uint64_t req_pte_addr = packet->full_addr;
         uint64_t pte_data = 0;
@@ -490,9 +498,15 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 
         // real allocation — let buddy allocator pick any free physical page
         if (is_pf) {
+
             pte_data = buddy_allocator.access();
+            PTEStatus pte_status = PTEStatus::NO_FAULT;
+            if(ddrp_req)
+            {
+                pte_status = PTEStatus::DDRP_PROXY;
+            }
             // Store into shadow and clear page_fault so future cache hits return correct value.
-            buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data);
+            buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data, pte_status);
         }
         
         if(packet->ptw_level == 0)

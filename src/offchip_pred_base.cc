@@ -27,3 +27,16 @@ bool OffchipPredBase::predict(ooo_model_instr *arch_instr, uint32_t data_index, 
     // return (rand() % 2) ? true : false;
     return false;
 }
+
+bool OffchipPredBase::predict(PACKET* packet)
+{
+    return false;
+}
+
+void OffchipPredBase::train(PACKET* packet)
+{
+}
+
+void OffchipPredBase::set_state_info(PACKET* packet)
+{
+}

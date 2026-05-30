@@ -468,8 +468,12 @@ int parse_knobs_tracker(void* user, const char* section, const char* name, const
 
 void parse_args(int argc, char *argv[])
 {
-	for(int index = 0; index < argc; ++index)
+	for(int index = 1; index < argc; ++index)
 	{
+		if (strcmp(argv[index], "-traces") == 0)
+		{
+			break;
+		}
 		string arg = string(argv[index]);
 		if(arg.compare(0, 2, "--") == 0)
 		{

@@ -293,6 +293,8 @@ public:
 
         offchip_pred->reset_stats();
         if(ddrp_monitor) ddrp_monitor->reset_stats();
+        if(page_table_walker && page_table_walker->trans_offchip_pred)
+            page_table_walker->trans_offchip_pred->reset_stats();
 
         bzero(&stats, sizeof(stats));
         for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)

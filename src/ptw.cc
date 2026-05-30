@@ -11,7 +11,7 @@
 #include <cstring>
 #include "const.h"
 #include "offchip_pred_base.h"
-#include "offchip_pred_perc.h"
+#include "offchip_pred_factory.h"
 
 static const uint64_t CR3_STRIDE_100GB = (100ULL * 1024ULL * 1024ULL * 1024ULL);
 
@@ -25,15 +25,15 @@ namespace knob{
 // Constructor
 PTWclass::PTWclass(uint32_t cpu_id) 
     : cpu(cpu_id),
-      PTW_LATENCY(100),
-      MAX_OUTSTANDING_WALKS(16),
-      PTW_RQ_LATENCY(2),
       stlb_cache(NULL),
       dtlb_cache(NULL),
       itlb_cache(NULL),
       l1d(NULL),
       l2(NULL),
-      llc(NULL)
+      llc(NULL),
+      PTW_LATENCY(100),
+      PTW_RQ_LATENCY(2),
+      MAX_OUTSTANDING_WALKS(16)
 {
     // explicitly initialize array elements since they cannot be in the init list
     level_caches[0] = PageWalkCacheLevel(PWC_L4_SETS, PWC_L4_WAYS);
@@ -42,13 +42,20 @@ PTWclass::PTWclass(uint32_t cpu_id)
     level_caches[3] = PageWalkCacheLevel(PWC_L1_SETS, PWC_L1_WAYS);
 
     memset(&stats, 0, sizeof(stats));
+
+    // Instantiate off-chip predictor using Factory Pattern
+    std::string pred_type = knob::enable_oracle_ptw_pred ? "oracle" : "perc";
+    trans_offchip_pred = OffchipPredFactory::create_predictor(pred_type, cpu, champsim_seed);
+
     initialize();
-    trans_offchip_pred = new OffchipPredPerc(cpu_id, "PTW_OffchipPredPerc", champsim_seed);
 }
 
 // Destructor
 PTWclass::~PTWclass() {
-    trans_offchip_pred->dump_stats();
+    if (trans_offchip_pred != nullptr) {
+        trans_offchip_pred->dump_stats();
+        delete trans_offchip_pred;
+    }
     print_stats();
 }
 
@@ -299,12 +306,13 @@ void PTWclass::operate() {
             // entry as a piggyback — handle_memory_response will re-queue it as an
             // outstanding walk once the primary response arrives and the PwC is filled.
             bool already_in_flight = false;
+            int match_mshr_idx = -1;
             for (int mi = 0; mi < PTW_MSHR_SIZE; mi++) {
                 if (mshr[mi].valid
                     && mshr[mi].current_pte_addr >> LOG2_BLOCK_SIZE == pte_addr >> LOG2_BLOCK_SIZE
                     && mshr[mi].current_level == (int)curr_lvl) {
                     already_in_flight = true;
-                    
+                    match_mshr_idx = mi;
                     PTW_MSHR_Entry* me = &mshr[mi];
                     debug.log(
                         "Duplicate", "instr1", me->instr_id, "full_vaddr", hex2str(me->vaddr), "pte_addr_full", hex2str(me->current_pte_addr), "lvl", me->current_level,
@@ -331,6 +339,7 @@ void PTWclass::operate() {
             req.fill_l1d     = 1;
             req.from_ptw     = 1;
             req.ptw_level    = curr_lvl;
+            req.instr_id     = walk.instr_id;
             req.ptw_walk_ptr = (void *)&mshr[mshr_idx];
             
             // required by perceptron 
@@ -340,30 +349,30 @@ void PTWclass::operate() {
             req.lq_index      = walk.packet.lq_index;
             req.pwc_miss_mem_hitwhere = walk.packet.pwc_miss_mem_hitwhere; // to set prev-walk on/off-chip features for perceptron
 
-            trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
-
-            // use oracle predictor, if enabled it will override pereceptron's prediction
-            if(knob::enable_oracle_ptw_pred)
-            oracle_predictor(&req);
+            trans_offchip_pred->set_state_info(&req); // set all necessary info for predictor to make decision and for training on response
 
             if (!already_in_flight) {
+
+                // Now only for original requests we are generating prediction
+                trans_offchip_pred->predict(&req); // populate req.ocp_feature and req.went_offchip_pred
+
                 // First walk for this cache block: dispatch a new TRANSLATION to L1D.
-    
                 if(req.went_offchip_pred && knob::enable_translation_ocp)
                 {
                     PACKET offchip_req = req; // copy by value since req will be modified for on-chip dispatch below
                     offchip_req.fill_level = FILL_DDRP;
                     offchip_req.fill_l1d = 0;
                     offchip_req.type = PREFETCH;
+                    offchip_req.went_offchip_pred = req.went_offchip_pred;
 
-                    stats.ddrp_stat.ddrp_offchip_calls++;
+                    stats.pred_stats.ddrp_offchip_calls++;
                     if(ooo_cpu[cpu].dram_controller->get_occupancy(1, offchip_req.full_addr >> LOG2_BLOCK_SIZE) == ooo_cpu[cpu].dram_controller->get_size(1, offchip_req.full_addr >> LOG2_BLOCK_SIZE))
                     {
-                        stats.ddrp_stat.ddrp_offchip_stalled++;
+                        stats.pred_stats.ddrp_offchip_stalled++;
                     }
                     else 
                     {
-                        stats.ddrp_stat.ddrp_offchip_sent++;
+                        stats.pred_stats.ddrp_offchip_sent++;
                         ooo_cpu[cpu].dram_controller->add_rq(&offchip_req);
                     }
                 }
@@ -373,6 +382,11 @@ void PTWclass::operate() {
                     stats.walks_stalled++;
                     l.log("PTW_PwC_Miss_L1DFull, vaddr", hex2str(walk.virt_full_addr),"paddr", hex2str(walk.phy_full_addr), "level", curr_lvl, "pte_addr", hex2str(pte_addr), "instr", walk.instr_id, "ins", +walk.packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
                     break; // L1D RQ full, retry next cycle
+                }
+            }
+            else{
+                if (match_mshr_idx != -1) {
+                    req.went_offchip_pred = mshr[match_mshr_idx].feature_packet.went_offchip_pred;
                 }
             }
 
@@ -566,7 +580,7 @@ void PTWclass::complete_page_walk(PACKET &pkt, uint64_t translated_pa) {
     // pkt.hit_where      = hit_where_t::PTW;
 
     // Store PWC miss info directly in ROB entry for tracking in complete_data_fetch
-    if (pkt.rob_index >= 0)
+    if (pkt.rob_index >= 0 && (uint32_t)pkt.rob_index < ooo_cpu[cpu].ROB.SIZE)
         ooo_cpu[cpu].ROB.entry[pkt.rob_index].pwc_miss_mem_hitwhere = pkt.pwc_miss_mem_hitwhere;
 
     // cerr << "[PTW_DIAG] complete_page_walk vaddr=" << hex2str(pkt.full_addr)
@@ -593,7 +607,18 @@ int PTWclass::find_free_mshr() {
 // do freelookup caches and assign if cache actually has data then went_offchip_pred=0 otherwise 1
 bool PTWclass::oracle_predictor(PACKET* packet)
 {
-    bool found_on_chip = (l1d->free_lookup(packet) || l2->free_lookup(packet) || llc->free_lookup(packet));
+    bool in_l1d = l1d->free_lookup(packet);
+    bool in_l2 = l2->free_lookup(packet);
+    bool in_llc = llc->free_lookup(packet);
+    bool found_on_chip = (in_l1d || in_l2 || in_llc);
+    
+    // if (packet->type == TRANSLATION && stats.total_walks_initiated < 20) {
+    //     cout << "[ORACLE_DEBUG] pte_addr: " << hex << packet->full_addr 
+    //          << " block_addr: " << (packet->address) 
+    //          << " lvl: " << packet->ptw_level
+    //          << " in_l1d: " << in_l1d << " in_l2: " << in_l2 << " in_llc: " << in_llc << dec << endl;
+    // }
+    
     packet->went_offchip_pred = !found_on_chip; // predict off-chip if not found in any on-chip cache
     return !found_on_chip; // predict off-chip if not found in any on-chip cache
 }
@@ -656,10 +681,10 @@ void PTWclass::print_stats() {
         cout << '\n';
     }
 
-    cout << "Predictor," << cpu << "," << "offchip_pred, calls, sent, stalled\n";
+    cout << "Predictor," << cpu << "," << "offchip_pred, calls, sent, stalled, predict_calls, oracle_predict_calls, already_in_flight\n";
         cout << "Predictor," << cpu << "," << "offchip_pred"
-             << "," << stats.ddrp_stat.ddrp_offchip_calls
-             << "," << stats.ddrp_stat.ddrp_offchip_sent
-             << "," << stats.ddrp_stat.ddrp_offchip_stalled
+             << "," << stats.pred_stats.ddrp_offchip_calls
+             << "," << stats.pred_stats.ddrp_offchip_sent
+             << "," << stats.pred_stats.ddrp_offchip_stalled
              << "\n";  
 }

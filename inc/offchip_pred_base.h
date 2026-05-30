@@ -18,7 +18,7 @@ public:
         srand(seed);
         dram_bw = 0;
     }
-    ~OffchipPredBase() {}
+    virtual ~OffchipPredBase() {}
     void update_dram_bw(uint8_t _dram_bw) { dram_bw = _dram_bw; }
 
     virtual void print_config();
@@ -26,6 +26,9 @@ public:
     virtual void reset_stats();
     virtual void train(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry);
     virtual bool predict(ooo_model_instr *arch_instr, uint32_t data_index, LSQ_ENTRY *lq_entry);
+    virtual bool predict(PACKET* packet);
+    virtual void train(PACKET* packet);
+    virtual void set_state_info(PACKET* packet);
 };
 
 #endif /* OFFCHIP_PRED_BASE_H */

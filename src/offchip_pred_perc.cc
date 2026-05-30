@@ -143,7 +143,15 @@ OffchipPredPerc::OffchipPredPerc(uint32_t _cpu, string _type, uint64_t _seed) : 
 
 OffchipPredPerc::~OffchipPredPerc()
 {
-
+    if (perc_pred != nullptr) {
+        delete perc_pred;
+    }
+    for (auto &set_buf : m_page_buffer) {
+        for (auto *entry : set_buf) {
+            delete entry;
+        }
+        set_buf.clear();
+    }
 }
 
 // ooo_model_instr: not used at all. lq_entry needs to get feature and state info and predicted bit. upto us feature could be stored elsewhere.

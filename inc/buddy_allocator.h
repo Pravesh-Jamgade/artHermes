@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "defs.h"
 #include "commons.h"
+#include <string>
 
 #define PAGE_FAULT_LATENCY   1000                   // cycles added on first access to a page
 #define BUDDY_MAX_ORDER      20                     // supports up to 2^20 pages (4GB at 4KB/page)
@@ -28,10 +29,17 @@
 #define SHADOW_BLOCKS_PER_PAGE    (PAGE_SIZE  / BLOCK_SIZE)         // 64
 #define NUM_SHADOW_PT_LEVELS      5                                  // levels 0..4 (1=PT … 4=PML4)
 
+
+enum PTEStatus{
+    NO_FAULT=0,
+    FAULT,
+    DDRP_PROXY
+};
+
 struct ShadowPTEntry {
     uint64_t value;       // physical address / PTE value
-    bool     page_fault;  // true until the PTW officially walks this entry
-    ShadowPTEntry() : value(0), page_fault(false) {}
+    PTEStatus page_fault;  // true until the PTW officially walks this entry
+    ShadowPTEntry() : value(0), page_fault(PTEStatus::FAULT) {}
 };
 
 struct ShadowPTBlock {
@@ -91,13 +99,14 @@ struct BuddyAllocator {
     //   has not been initialised yet.
     // ---------------------------------------------------------------------------
     void shadow_init_page(uint64_t page_key, uint8_t level);
-    void shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_t value);
+    void shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_t value, PTEStatus pte_status = PTEStatus::NO_FAULT);
     // Returns true if the page is tracked; also sets 'value' and 'is_page_fault'.
     bool shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault) const;
     // Convenience overload — ignores page_fault flag (backward compat).
     bool shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value) const;
     // Clear the page_fault flag for a specific PTE.
     void shadow_clear_page_fault(uint64_t pte_paddr, uint8_t level);
+    std::string debug_print_valid_block_entry(uint64_t pte_paddr, uint8_t level);
 
 private:
     uint64_t alloc_any(); // allocate any available order-0 page from the buddy free lists

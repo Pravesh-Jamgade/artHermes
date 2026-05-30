@@ -1884,6 +1884,13 @@ bool CACHE::free_lookup(PACKET *packet)
         }
     }
 
+    // 5. Check PQ (Prefetch Queue)
+    if (!hit) {
+        if (PQ.check_queue(packet) != -1) {
+            hit = true;
+        }
+    }
+
     return hit;
 }
 
@@ -2754,11 +2761,17 @@ void CACHE::record_offchip_event(uint32_t cpu, PACKET* packet)
     uint32_t lq_index = packet->lq_index;
     if(packet->type == LOAD)
     {
-        ooo_cpu[cpu].ROB.entry[packet->rob_index].data_went_offchip = 1; // mark in ROB as well
+        if (packet->rob_index >= 0 && (uint32_t)packet->rob_index < ooo_cpu[cpu].ROB.SIZE)
+        {
+            ooo_cpu[cpu].ROB.entry[packet->rob_index].data_went_offchip = 1; // mark in ROB as well
+        }
     }
     else if(packet->type == TRANSLATION)
     {
-        ooo_cpu[cpu].ROB.entry[packet->rob_index].translation_went_offchip = 1; // mark in ROB as well
+        if (packet->rob_index >= 0 && (uint32_t)packet->rob_index < ooo_cpu[cpu].ROB.SIZE)
+        {
+            ooo_cpu[cpu].ROB.entry[packet->rob_index].translation_went_offchip = 1; // mark in ROB as well
+        }
 
         packet->went_offchip = 1; // also mark in the packet for prefetcher feedback
     }
