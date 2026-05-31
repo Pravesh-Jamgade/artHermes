@@ -182,6 +182,13 @@ class PACKET {
     ocp_base_feature_t *ocp_feature;
     bool went_offchip; 
 
+    // DDRP translation waiting/overlap tracking
+    uint64_t ddrp_q1_cycle;
+    uint64_t ddrp_q2_cycle;
+    uint64_t ddrp_q3_cycle;
+    bool ddrp_merged_translation;
+    uint8_t ddrp_wait_type; // 1 = wait and merge in queue, 2 = wait for ddrp to finish
+
     PACKET() {
         id = next_id++;
 
@@ -260,6 +267,12 @@ class PACKET {
         
         ocp_feature = NULL;
         went_offchip = false;
+
+        ddrp_q1_cycle = 0;
+        ddrp_q2_cycle = 0;
+        ddrp_q3_cycle = 0;
+        ddrp_merged_translation = false;
+        ddrp_wait_type = 0;
     };
     std::string to_string();
 };

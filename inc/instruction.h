@@ -7,6 +7,44 @@
 #include "defs.h"
 #include "set.h"
 #include "const.h"
+#define MAGIC 0x544C425452414345ULL
+
+using namespace std;
+
+struct context_instr {
+  uint64_t destination_memory[NUM_INSTR_DESTINATIONS] = {};
+  uint64_t source_memory[NUM_INSTR_SOURCES] = {};
+  uint64_t ip = 0;
+  uint64_t magic = 0;
+  uint64_t window_id = 0;
+  uint32_t record_size = 0;// 1 for store , 2 for load
+  uint8_t is_branch = 0;
+  uint8_t branch_taken = 0;
+  uint8_t destination_registers[NUM_INSTR_DESTINATIONS] = {};
+  uint8_t source_registers[NUM_INSTR_SOURCES] = {};
+  uint8_t trace_window = 0;
+
+  context_instr()
+  {
+    ip = 0;
+    is_branch = 0;
+    branch_taken = 0;
+    magic = 0;
+    record_size = 0;
+    trace_window = 0;
+
+    for (uint32_t i=0; i<NUM_INSTR_SOURCES; i++) {
+        source_registers[i] = 0;
+        source_memory[i] = 0;
+    }
+
+    for (uint32_t i=0; i<NUM_INSTR_DESTINATIONS; i++) {
+        destination_registers[i] = 0;
+        destination_memory[i] = 0;
+    }
+  }
+};
+
 
 class input_instr {
   public:
@@ -155,7 +193,9 @@ class ooo_model_instr {
     uint8_t mem_source_went_offchip[NUM_INSTR_SOURCES]; // RBERA: to track which memory sources went offchip
 
     uint64_t data_fetch_finished_event_cycle,
-             translation_finished_event_cycle;
+             translation_finished_event_cycle,
+             dispatch_cycle,
+             become_head_cycle;
 
     int translation_went_offchip=0;
     int data_went_offchip=0;
@@ -165,10 +205,17 @@ class ooo_model_instr {
     hit_where_t data_hit_where;
     uint32_t pwc_miss_mem_hitwhere;
 
+    //////
+    bool wait = false;
+    uint64_t window_id = 0;
+    uint32_t record_size = 0;
+
     ooo_model_instr() {
 
         data_fetch_finished_event_cycle = UINT64_MAX;
         translation_finished_event_cycle = UINT64_MAX;
+        dispatch_cycle = UINT64_MAX;
+        become_head_cycle = UINT64_MAX;
 
         instr_id = 0;
         ip = 0;
@@ -251,6 +298,53 @@ class ooo_model_instr {
         }
 #endif
     };
+
+    ooo_model_instr(uint8_t cpu, context_instr instr)
+    {
+        std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
+        std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
+        std::copy(std::begin(instr.source_registers), std::end(instr.source_registers), std::begin(this->source_registers));
+        std::copy(std::begin(instr.source_memory), std::end(instr.source_memory), std::begin(this->source_memory));
+
+        this->ip = instr.ip;
+        this->is_branch = instr.is_branch;
+        this->branch_taken = instr.branch_taken;
+        this->wait = instr.trace_window;
+        this->window_id = instr.window_id;
+
+        asid[0] = cpu;
+        asid[1] = cpu;
+        this->record_size =instr.record_size;
+    }
+    
+    ooo_model_instr(uint8_t cpu, input_instr instr)
+    {
+        std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
+        std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
+        std::copy(std::begin(instr.source_registers), std::end(instr.source_registers), std::begin(this->source_registers));
+        std::copy(std::begin(instr.source_memory), std::end(instr.source_memory), std::begin(this->source_memory));
+
+        this->ip = instr.ip;
+        this->is_branch = instr.is_branch;
+        this->branch_taken = instr.branch_taken;
+
+        asid[0] = cpu;
+        asid[1] = cpu;
+    }
+
+    ooo_model_instr(uint8_t cpu, cloudsuite_instr instr)
+    {
+        std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
+        std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
+        std::copy(std::begin(instr.source_registers), std::end(instr.source_registers), std::begin(this->source_registers));
+        std::copy(std::begin(instr.source_memory), std::end(instr.source_memory), std::begin(this->source_memory));
+
+        this->ip = instr.ip;
+        this->is_branch = instr.is_branch;
+        this->branch_taken = instr.branch_taken;
+
+        std::copy(std::begin(instr.asid), std::begin(instr.asid), std::begin(this->asid));
+    }
 
     string to_string()
     {

@@ -2,7 +2,6 @@
 #include <string>
 
 #include "instruction.h"
-#define MAGIC 0x544C425452414345ULL
 
 class tracereader
 {

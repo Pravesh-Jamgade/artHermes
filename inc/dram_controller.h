@@ -39,7 +39,12 @@ class MEMORY_CONTROLLER : public MEMORY {
     PACKET_QUEUE WQ[DRAM_CHANNELS], RQ[DRAM_CHANNELS];
 
     // DDRP buffer
-    vector<deque<uint64_t> > ddrp_buffer;
+    struct ddrp_buffer_entry {
+        uint64_t address;
+        uint64_t q1_cycle;
+        uint64_t q2_cycle;
+    };
+    vector<deque<ddrp_buffer_entry> > ddrp_buffer;
 
     // to measure bandwidth
     uint64_t rq_enqueue_count, last_enqueue_count, epoch_enqueue_count, next_bw_measure_cycle;
@@ -106,6 +111,16 @@ class MEMORY_CONTROLLER : public MEMORY {
                 uint64_t miss;
             } lookup;
         } ddrp_buffer;
+
+        struct
+        {
+            uint64_t wait_merge_queue_count;
+            uint64_t wait_merge_queue_cycles;
+            uint64_t wait_ddrp_finish_count;
+            uint64_t wait_ddrp_finish_cycles;
+            uint64_t buffer_hit_overlap_count;
+            uint64_t buffer_hit_overlap_cycles;
+        } translation_waiting;
         
     } stats;
 
@@ -202,8 +217,8 @@ class MEMORY_CONTROLLER : public MEMORY {
 
     // DDRP buffer
     void init_ddrp_buffer();
-    void insert_ddrp_buffer(uint64_t address);
-    bool lookup_ddrp_buffer(uint64_t address);
+    void insert_ddrp_buffer(uint64_t address, uint64_t q1 = 0, uint64_t q2 = 0);
+    bool lookup_ddrp_buffer(uint64_t address, uint64_t *q1 = nullptr, uint64_t *q2 = nullptr);
     uint32_t get_ddrp_buffer_set_index(uint64_t address);
 };
 

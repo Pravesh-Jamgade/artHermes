@@ -404,6 +404,19 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                 // send data back to the core cache hierarchy, only if the request is not DDRP
                 if(queue->entry[request_index].fill_level < FILL_DDRP)
                 {
+                    if (queue->entry[request_index].ddrp_merged_translation) {
+                        uint64_t q2 = uncore.cycle;
+                        uint64_t q3 = queue->entry[request_index].ddrp_q3_cycle;
+                        uint64_t wait_cycles = (q2 > q3) ? (q2 - q3) : 0;
+                        if (queue->entry[request_index].ddrp_wait_type == 1) {
+                            stats.translation_waiting.wait_merge_queue_count++;
+                            stats.translation_waiting.wait_merge_queue_cycles += wait_cycles;
+                        } else if (queue->entry[request_index].ddrp_wait_type == 2) {
+                            stats.translation_waiting.wait_ddrp_finish_count++;
+                            stats.translation_waiting.wait_ddrp_finish_cycles += wait_cycles;
+                        }
+                    }
+
                     upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
                     stats.dram_process.returned[queue->entry[request_index].type]++;
 
@@ -420,7 +433,7 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                     if(knob::dram_cntlr_enable_ddrp_buffer)
                     {
                         stats.dram_process.buffered++;
-                        insert_ddrp_buffer(op_addr);
+                        insert_ddrp_buffer(op_addr, queue->entry[request_index].ddrp_q1_cycle, uncore.cycle);
                         DDRP_DP ( if (warmup_complete[op_cpu]) {
                         cout << "[" << queue->NAME << "] " <<  __func__ << " buffering_data";
                         cout << " instr_id: " << queue->entry[request_index].instr_id << " address: " << hex << queue->entry[request_index].address << dec;
@@ -568,9 +581,16 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     // check for possible hit in DDRP buffer
     if(knob::dram_cntlr_enable_ddrp_buffer)
     {
-        bool hit = lookup_ddrp_buffer(packet->address);
+        uint64_t q1 = 0, q2 = 0;
+        bool hit = lookup_ddrp_buffer(packet->address, &q1, &q2);
         if(hit)
         {
+            if (packet->type == TRANSLATION) {
+                uint64_t q3 = uncore.cycle;
+                uint64_t overlap_cycles = (q3 > q2) ? (q3 - q2) : 0;
+                stats.translation_waiting.buffer_hit_overlap_count++;
+                stats.translation_waiting.buffer_hit_overlap_cycles += overlap_cycles;
+            }
             // RBERA_TODO: do we want to model latency here?
             if (return_data_to_core) 
             {
@@ -625,10 +645,17 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
                 uint8_t tmp_scheduled = RQ[channel].entry[index].scheduled;
                 uint64_t tmp_event_cycle = RQ[channel].entry[index].event_cycle;
                 uint64_t tmp_enque_cycle = RQ[channel].entry[index].enque_cycle[IS_DRAM][IS_RQ];
+                uint64_t tmp_ddrp_q1 = RQ[channel].entry[index].ddrp_q1_cycle;
                 RQ[channel].entry[index] = *packet; // merge
                 RQ[channel].entry[index].scheduled = tmp_scheduled;
                 RQ[channel].entry[index].event_cycle = tmp_event_cycle;
                 RQ[channel].entry[index].enque_cycle[IS_DRAM][IS_RQ] = tmp_enque_cycle;
+                RQ[channel].entry[index].ddrp_q1_cycle = tmp_ddrp_q1;
+                if (packet->type == TRANSLATION) {
+                    RQ[channel].entry[index].ddrp_merged_translation = true;
+                    RQ[channel].entry[index].ddrp_q3_cycle = uncore.cycle;
+                    RQ[channel].entry[index].ddrp_wait_type = tmp_scheduled ? 2 : 1;
+                }
                 stats.ddrp.llc_miss.rq_hit[RQ[channel].entry[index].type]++;
                 stats.ddrp.llc_miss.total[RQ[channel].entry[index].type]++;
             }
@@ -683,6 +710,9 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
             RQ[channel].occupancy++;
             RQ[channel].entry[index].enque_cycle[IS_DRAM][IS_RQ] = uncore.cycle;
             rq_enqueue_count++;
+            if (packet->fill_level == FILL_DDRP) {
+                RQ[channel].entry[index].ddrp_q1_cycle = uncore.cycle;
+            }
 
             // cout << "[ENQUEUE_" << RQ[channel].NAME << "] " << " id: " << packet->id << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id;
             // cout << " address: " << hex << packet->address << " full_addr: " << packet->full_addr << dec;
@@ -957,19 +987,19 @@ void MEMORY_CONTROLLER::init_ddrp_buffer()
 {
     // init buffer
     ddrp_buffer.clear();
-    deque<uint64_t> d;
+    deque<ddrp_buffer_entry> d;
     ddrp_buffer.resize(knob::dram_cntlr_ddrp_buffer_sets, d);
 }
 
-void MEMORY_CONTROLLER::insert_ddrp_buffer(uint64_t addr)
+void MEMORY_CONTROLLER::insert_ddrp_buffer(uint64_t addr, uint64_t q1, uint64_t q2)
 {
     stats.ddrp_buffer.insert.called++;
     uint32_t set = get_ddrp_buffer_set_index(addr);
-    auto it = find_if(ddrp_buffer[set].begin(), ddrp_buffer[set].end(), [addr](uint64_t m_addr){return m_addr == addr;});
+    auto it = find_if(ddrp_buffer[set].begin(), ddrp_buffer[set].end(), [addr](const ddrp_buffer_entry& entry){return entry.address == addr;});
     if(it != ddrp_buffer[set].end())
     {
         ddrp_buffer[set].erase(it);
-        ddrp_buffer[set].push_back(addr);
+        ddrp_buffer[set].push_back({addr, q1, q2});
         stats.ddrp_buffer.insert.hit++;
     }
     else
@@ -979,19 +1009,21 @@ void MEMORY_CONTROLLER::insert_ddrp_buffer(uint64_t addr)
             ddrp_buffer[set].pop_front();
             stats.ddrp_buffer.insert.evict++;
         }
-        ddrp_buffer[set].push_back(addr);
+        ddrp_buffer[set].push_back({addr, q1, q2});
         stats.ddrp_buffer.insert.insert++;
     }
 }
 
-bool MEMORY_CONTROLLER::lookup_ddrp_buffer(uint64_t addr)
+bool MEMORY_CONTROLLER::lookup_ddrp_buffer(uint64_t addr, uint64_t *q1, uint64_t *q2)
 {
     stats.ddrp_buffer.lookup.called++;
     uint32_t set = get_ddrp_buffer_set_index(addr);
-    auto it = find_if(ddrp_buffer[set].begin(), ddrp_buffer[set].end(), [addr](uint64_t m_addr){return m_addr == addr;});
+    auto it = find_if(ddrp_buffer[set].begin(), ddrp_buffer[set].end(), [addr](const ddrp_buffer_entry& entry){return entry.address == addr;});
     if(it != ddrp_buffer[set].end())
     {
         stats.ddrp_buffer.lookup.hit++;
+        if (q1) *q1 = it->q1_cycle;
+        if (q2) *q2 = it->q2_cycle;
         return true;
     }
     else

@@ -439,6 +439,8 @@ namespace knob
 	// through the real ITLB → STLB → PTW pipeline.
 	bool itlb_oracle_translation = false;
 
+	// When true: read traces from shared memory on-the-fly (Intel Pintool application-driven mode)
+	bool enable_app_driven = false;
 }
 
 std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
@@ -1947,6 +1949,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "itlb_oracle_translation"))
 	{
 		knob::itlb_oracle_translation = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "enable_app_driven"))
+	{
+		knob::enable_app_driven = !strcmp(value, "true") ? true : false;
 	}
 	else if (MATCH("", "ddrp_monitor_exploit_epoch"))
 	{

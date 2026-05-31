@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include "logging.h"
 #include "llc_pred_perc.h"
+#include "tracereader.h"
 
 #define FIXED_FLOAT(x) std::fixed << std::setprecision(5) << (x)
 // #define PRINT_AUX_STATS 1
@@ -85,6 +86,7 @@ namespace knob
     extern bool     enable_ddrp_monitor;
     extern int itlb_oracle_translation;
     extern bool knob_doa_predictor;
+    extern bool enable_app_driven;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -103,7 +105,7 @@ map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_C
 uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
 
 string is_data_names[2] = {"instruction", "data"};
-string type_names[NUM_TYPES] = {"load", "RFO", "prefetch", "writeback"};
+string type_names[NUM_TYPES] = {"load", "RFO", "prefetch", "writeback", "translation"};
 
 void print_knobs()
 {
@@ -230,6 +232,99 @@ void print_core_roi_stats(uint32_t cpu)
 
     cout << '\n';
     {
+        // rob load waiting stats
+        double avg_rob_latency = 0;
+        double avg_trans_not_blocked = 0;
+        double avg_trans_blocked = 0;
+        double avg_data_not_blocked = 0;
+        double avg_data_blocked = 0;
+        if (ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads > 0) {
+            double total_loads = ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads;
+            avg_rob_latency = ooo_cpu[cpu].stats.rob_load_waiting.total_rob_latency / total_loads;
+            avg_trans_not_blocked = ooo_cpu[cpu].stats.rob_load_waiting.translation_not_blocked / total_loads;
+            avg_trans_blocked = ooo_cpu[cpu].stats.rob_load_waiting.translation_blocked / total_loads;
+            avg_data_not_blocked = ooo_cpu[cpu].stats.rob_load_waiting.data_not_blocked / total_loads;
+            avg_data_blocked = ooo_cpu[cpu].stats.rob_load_waiting.data_blocked / total_loads;
+        }
+
+        cout << "Core_" << cpu << "_rob_load_waiting_total_retired_loads " << ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads << endl
+            << "Core_" << cpu << "_rob_load_waiting_total_rob_latency " << ooo_cpu[cpu].stats.rob_load_waiting.total_rob_latency << endl
+            << "Core_" << cpu << "_rob_load_waiting_translation_not_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.translation_not_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_translation_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.translation_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_data_not_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.data_not_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_data_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.data_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_rob_latency " << avg_rob_latency << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_translation_not_blocked " << avg_trans_not_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_translation_blocked " << avg_trans_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_data_not_blocked " << avg_data_not_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_data_blocked " << avg_data_blocked << endl
+            << endl;
+
+        // Combined ROB-blocking load latency distribution histogram
+        {
+            const auto &trans_hist = ooo_cpu[cpu].rob_load_waiting_translation_blocked_hist;
+            const auto &data_hist = ooo_cpu[cpu].rob_load_waiting_data_blocked_hist;
+
+            printf("Core_%u_rob_load_waiting_hist_avg_translation,%.2f\n", cpu, trans_hist.average());
+            printf("Core_%u_rob_load_waiting_hist_avg_data,%.2f\n", cpu, data_hist.average());
+
+            std::vector<int> active_buckets;
+            for (int idx = 0; idx < LatencyHistogram::kBuckets; ++idx) {
+                if (trans_hist.buckets[idx] > 0 || data_hist.buckets[idx] > 0) {
+                    active_buckets.push_back(idx);
+                }
+            }
+
+            if (!active_buckets.empty()) {
+                printf("Core_%u_rob_load_waiting_hist_buckets", cpu);
+                for (int idx : active_buckets) {
+                    uint64_t range_start = (idx == 0) ? 0 : (uint64_t(1) << idx);
+                    if (idx + 1 < LatencyHistogram::kBuckets) {
+                        uint64_t range_end = (uint64_t(1) << (idx + 1)) - 1;
+                        printf(",[%llu..%llu]", (unsigned long long)range_start, (unsigned long long)range_end);
+                    } else {
+                        printf(",[%llu..inf]", (unsigned long long)range_start);
+                    }
+                }
+                printf("\n");
+
+                printf("Core_%u_rob_load_waiting_hist_translation", cpu);
+                for (int idx : active_buckets) {
+                    printf(",%llu", (unsigned long long)trans_hist.buckets[idx]);
+                }
+                printf("\n");
+
+                printf("Core_%u_rob_load_waiting_hist_data", cpu);
+                for (int idx : active_buckets) {
+                    printf(",%llu", (unsigned long long)data_hist.buckets[idx]);
+                }
+                printf("\n");
+            }
+
+            // tail latencies
+            printf("Core_%u_rob_load_waiting_hist_tail_buckets", cpu);
+            for (size_t i = 0; i < TAIL_BINS; ++i) {
+                uint64_t range_start = TAIL_START + i * TAIL_W;
+                uint64_t range_end = range_start + TAIL_W - 1;
+                printf(",[%llu..%llu]", (unsigned long long)range_start, (unsigned long long)range_end);
+            }
+            printf("\n");
+
+            printf("Core_%u_rob_load_waiting_hist_tail_translation", cpu);
+            for (size_t i = 0; i < TAIL_BINS; ++i) {
+                printf(",%llu", (unsigned long long)trans_hist.tail_bins[i]);
+            }
+            printf("\n");
+
+            printf("Core_%u_rob_load_waiting_hist_tail_data", cpu);
+            for (size_t i = 0; i < TAIL_BINS; ++i) {
+                printf(",%llu", (unsigned long long)data_hist.tail_bins[i]);
+            }
+            printf("\n");
+            printf("\n");
+        }
+
+
         // load-induced bubble stats
         cout << "Core_" << cpu << "_bubble_called " << ooo_cpu[cpu].stats.bubble.called << endl
             << "Core_" << cpu << "_bubble_rob_non_head " << ooo_cpu[cpu].stats.bubble.rob_non_head << endl
@@ -793,6 +888,25 @@ void print_dram_stats()
          << "ddrp_buffer_lookup_hit " << uncore.DRAM.stats.ddrp_buffer.lookup.hit << endl
          << "ddrp_buffer_lookup_miss " << uncore.DRAM.stats.ddrp_buffer.lookup.miss << endl
          << endl;
+
+    cout << "DRAM_translation_wait_merge_queue_count " << uncore.DRAM.stats.translation_waiting.wait_merge_queue_count << endl;
+    if (uncore.DRAM.stats.translation_waiting.wait_merge_queue_count)
+        cout << "DRAM_translation_wait_merge_queue_avg_cycles " << (1.0 * uncore.DRAM.stats.translation_waiting.wait_merge_queue_cycles / uncore.DRAM.stats.translation_waiting.wait_merge_queue_count) << endl;
+    else
+        cout << "DRAM_translation_wait_merge_queue_avg_cycles 0" << endl;
+
+    cout << "DRAM_translation_wait_ddrp_finish_count " << uncore.DRAM.stats.translation_waiting.wait_ddrp_finish_count << endl;
+    if (uncore.DRAM.stats.translation_waiting.wait_ddrp_finish_count)
+        cout << "DRAM_translation_wait_ddrp_finish_avg_cycles " << (1.0 * uncore.DRAM.stats.translation_waiting.wait_ddrp_finish_cycles / uncore.DRAM.stats.translation_waiting.wait_ddrp_finish_count) << endl;
+    else
+        cout << "DRAM_translation_wait_ddrp_finish_avg_cycles 0" << endl;
+
+    cout << "DRAM_translation_buffer_hit_overlap_count " << uncore.DRAM.stats.translation_waiting.buffer_hit_overlap_count << endl;
+    if (uncore.DRAM.stats.translation_waiting.buffer_hit_overlap_count)
+        cout << "DRAM_translation_buffer_hit_overlap_avg_cycles " << (1.0 * uncore.DRAM.stats.translation_waiting.buffer_hit_overlap_cycles / uncore.DRAM.stats.translation_waiting.buffer_hit_overlap_count) << endl;
+    else
+        cout << "DRAM_translation_buffer_hit_overlap_avg_cycles 0" << endl;
+    cout << endl;
 
     cout << "DRAM_bw_pochs " << uncore.DRAM.total_bw_epochs << endl;
     for(uint32_t index = 0; index < DRAM_BW_LEVELS; ++index)
@@ -1462,79 +1576,91 @@ int main(int argc, char** argv)
     // search through the argv for "-traces"
     int found_traces = 0;
     int count_traces = 0;
+    if (knob::enable_app_driven) {
+        cout << "Running in Application-driven mode (Intel Pintool shared buffer)" << endl;
+    }
     cout << endl;
+
+    vector<tracereader*> traces;
+
     for (int i=0; i<argc; i++) {
         if (found_traces)
         {
-            printf("CPU_%d runs %s\n", count_traces, argv[i]);
+            if (knob::enable_app_driven) {
+                printf("CPU_%d reads shared buffer path: %s\n", count_traces, argv[i]);
+                sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
+                ooo_cpu[count_traces].trace_file = NULL;
+            } else {
+                printf("CPU_%d runs %s\n", count_traces, argv[i]);
 
-            sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
-            cout << " SSSSSSSSSSSSSS"  << ooo_cpu[count_traces].trace_string << '\n';
+                sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
+                cout << " SSSSSSSSSSSSSS"  << ooo_cpu[count_traces].trace_string << '\n';
 
-            std::string full_name(argv[i]);
-            std::string last_dot = full_name.substr(full_name.find_last_of("."));
+                std::string full_name(argv[i]);
+                std::string last_dot = full_name.substr(full_name.find_last_of("."));
 
-            std::string fmtstr;
-            std::string decomp_program;
-            if (full_name.substr(0,4) == "http")
-            {
-                // Check file exists
-                char testfile_command[4096];
-                sprintf(testfile_command, "wget -q --spider %s", argv[i]);
-                FILE *testfile = popen(testfile_command, "r");
-                if (pclose(testfile))
+                std::string fmtstr;
+                std::string decomp_program;
+                if (full_name.substr(0,4) == "http")
                 {
-                    std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                    assert(0 && "Remote trace file does not exist or is inaccessible");
+                    // Check file exists
+                    char testfile_command[4096];
+                    sprintf(testfile_command, "wget -q --spider %s", argv[i]);
+                    FILE *testfile = popen(testfile_command, "r");
+                    if (pclose(testfile))
+                    {
+                        std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                        assert(0 && "Remote trace file does not exist or is inaccessible");
+                    }
+                    fmtstr = "wget -qO- %2$s | %1$s -dc";
                 }
-                fmtstr = "wget -qO- %2$s | %1$s -dc";
-            }
-            else
-            {
-                std::ifstream testfile(argv[i]);
-                if (!testfile.good())
+                else
                 {
-                    std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                    assert(0 && "Local trace file does not exist or is not readable");
+                    std::ifstream testfile(argv[i]);
+                    if (!testfile.good())
+                    {
+                        std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                        assert(0 && "Local trace file does not exist or is not readable");
+                    }
+                    fmtstr = "%1$s -dc %2$s";
                 }
-                fmtstr = "%1$s -dc %2$s";
-            }
 
-            if (last_dot[1] == 'g') // gzip format
-                decomp_program = "gzip";
-            else if (last_dot[1] == 'x') // xz
-                decomp_program = "xz";
-            else {
-                std::cout << "ChampSim does not support traces other than gz or xz compression!" << std::endl;
-                assert(0);
-            }
+                if (last_dot[1] == 'g') // gzip format
+                    decomp_program = "gzip";
+                else if (last_dot[1] == 'x') // xz
+                    decomp_program = "xz";
+                else {
+                    std::cout << "ChampSim does not support traces other than gz or xz compression!" << std::endl;
+                    assert(0);
+                }
 
-            sprintf(ooo_cpu[count_traces].gunzip_command, fmtstr.c_str(), decomp_program.c_str(), argv[i]);
+                sprintf(ooo_cpu[count_traces].gunzip_command, fmtstr.c_str(), decomp_program.c_str(), argv[i]);
 
-            char *pch[100];
-            int count_str = 0;
-            pch[0] = strtok (argv[i], " /,.-");
-            while (pch[count_str] != NULL) {
-                //printf ("%s %d\n", pch[count_str], count_str);
-                count_str++;
-                pch[count_str] = strtok (NULL, " /,.-");
-            }
+                char *pch[100];
+                int count_str = 0;
+                pch[0] = strtok (argv[i], " /,.-");
+                while (pch[count_str] != NULL) {
+                    //printf ("%s %d\n", pch[count_str], count_str);
+                    count_str++;
+                    pch[count_str] = strtok (NULL, " /,.-");
+                }
 
-            //printf("max count_str: %d\n", count_str);
-            //printf("application: %s\n", pch[count_str-3]);
+                //printf("max count_str: %d\n", count_str);
+                //printf("application: %s\n", pch[count_str-3]);
 
-            int j = 0;
-            while (pch[count_str-3][j] != '\0') {
-                seed_number += pch[count_str-3][j];
-                //printf("%c %d %d\n", pch[count_str-3][j], j, seed_number);
-                j++;
-            }
+                int j = 0;
+                while (pch[count_str-3][j] != '\0') {
+                    seed_number += pch[count_str-3][j];
+                    //printf("%c %d %d\n", pch[count_str-3][j], j, seed_number);
+                    j++;
+                }
 
-            ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
-            if (ooo_cpu[count_traces].trace_file == NULL) {
-                printf("\n*** Trace file not found: %s ***\n", argv[i]);
-                printf("Command: %s\n", ooo_cpu[count_traces].gunzip_command);
-                assert(0 && "Failed to open trace file with popen");
+                ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
+                if (ooo_cpu[count_traces].trace_file == NULL) {
+                    printf("\n*** Trace file not found: %s ***\n", argv[i]);
+                    printf("Command: %s\n", ooo_cpu[count_traces].gunzip_command);
+                    assert(0 && "Failed to open trace file with popen");
+                }
             }
 
             count_traces++;

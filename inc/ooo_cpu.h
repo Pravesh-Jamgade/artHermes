@@ -30,6 +30,7 @@ namespace knob
     extern uint32_t num_rob_partitions;
     extern uint32_t window_size;
     extern float sleep_frac;
+    extern bool enable_app_driven;
 }
 
 class load_per_ip_info_t
@@ -60,6 +61,8 @@ public:
 };
 
 // cpu
+struct SharedBuffer;
+
 class O3_CPU 
 {
 public:
@@ -67,6 +70,7 @@ public:
 
     // trace
     FILE *trace_file;
+    SharedBuffer *shared_buffer_ptr;
     char trace_string[1024];
     char gunzip_command[1024];
     IWCounter* interval_counter;
@@ -168,10 +172,21 @@ public:
             uint64_t pwc_miss_and_data_hitwhere[4][hit_where_t::NumHitWheres][hit_where_t::NumHitWheres] = {};
             map<hit_where_t, map<hit_where_t, uint64_t>> ptw_and_data_hitwhere;
         } hitwhere_combinations;
+        struct
+        {
+            uint64_t total_retired_loads;
+            uint64_t total_rob_latency;
+            uint64_t translation_not_blocked;
+            uint64_t translation_blocked;
+            uint64_t data_not_blocked;
+            uint64_t data_blocked;
+        } rob_load_waiting;
     } stats;
 
     LatencyHistogram load_to_use_hist; // histogram of load-to-use latency for loads that went offchip
     LatencyHistogram load_to_translation_hist; // histogram of load-to-translation latency for loads that went offchip
+    LatencyHistogram rob_load_waiting_translation_blocked_hist; // histogram of ROB blocking latency due to translation
+    LatencyHistogram rob_load_waiting_data_blocked_hist; // histogram of ROB blocking latency due to data access
 
     // bubble stats per ROB partiton
     vector<uint64_t> bubble_max, bubble_min, bubble_tot, bubble_cnt;
@@ -192,6 +207,7 @@ public:
 
         // trace
         trace_file = NULL;
+        shared_buffer_ptr = NULL;
 
         interval_counter = new IWCounter(50000000, 0.25); // 50M instructions with 25% sampling
 
@@ -297,6 +313,10 @@ public:
             page_table_walker->trans_offchip_pred->reset_stats();
 
         bzero(&stats, sizeof(stats));
+        load_to_use_hist = LatencyHistogram();
+        load_to_translation_hist = LatencyHistogram();
+        rob_load_waiting_translation_blocked_hist = LatencyHistogram();
+        rob_load_waiting_data_blocked_hist = LatencyHistogram();
         for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)
         {
             bubble_max[index] = 0;
@@ -378,6 +398,7 @@ public:
   void measure_pipeline_bubble_stats(uint32_t lq_index, uint32_t rob_index);
   void measure_bubble();
   void monitor_loads(uint32_t lq_index);
+  void accumulate_rob_load_latencies(ooo_model_instr *entry);
   uint32_t get_rob_parition_id(int32_t rob_pos);
   bool rob_part_id_is_frontal(uint32_t rob_part_id);
   bool rob_part_id_is_dorsal(uint32_t rob_part_id);

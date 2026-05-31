@@ -1,4 +1,9 @@
 #include <stdio.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 #include "ooo_cpu.h"
 #include "set.h"
 #include "logging.h"
@@ -33,7 +38,16 @@ namespace knob
     extern bool     enable_offchip_tracing;
     extern int itlb_oracle_translation;
     extern bool partial_window_trace;
+    extern bool enable_app_driven;
 }
+
+struct SharedBuffer {
+    volatile uint64_t head = 0;
+    volatile uint64_t tail = 0;
+    static constexpr size_t BUFFER_SIZE = 1024;
+    input_instr buffer[BUFFER_SIZE];
+};
+
 
 void O3_CPU::initialize_core()
 {
@@ -226,23 +240,62 @@ void O3_CPU::read_from_trace()
 	    else // not a cloudsuite trace
 	    {
             input_instr trace_read_instr;
-            if (!fread(&trace_read_instr, instr_size, 1, trace_file))
+            bool read_success = false;
+
+            if (knob::enable_app_driven)
             {
-                // reached end of file for this trace
-                cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl; 
-                
-                // close the trace file and re-open it
-                pclose(trace_file);
-                trace_file = popen(gunzip_command, "r");
-                if (trace_file == NULL) 
+                if (!shared_buffer_ptr) {
+                    cout << "Core " << cpu << " mapping POSIX shared memory path: " << trace_string << endl;
+                    int shm_fd = shm_open(trace_string, O_RDWR, 0666);
+                    if (shm_fd < 0) {
+                        cerr << "Failed to open shared memory: " << trace_string << " (errno=" << errno << ")" << endl;
+                        exit(1);
+                    }
+                    shared_buffer_ptr = (SharedBuffer*)mmap(NULL, sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+                    if (shared_buffer_ptr == MAP_FAILED) {
+                        cerr << "Failed to mmap shared memory: " << trace_string << " (errno=" << errno << ")" << endl;
+                        exit(1);
+                    }
+                    close(shm_fd);
+                    cout << "Core " << cpu << " successfully mapped shared memory." << endl;
+                }
+
+                // If buffer is empty, spin and wait until the producer (Pintool) writes new data
+                while (shared_buffer_ptr->head == shared_buffer_ptr->tail) {
+                    #if defined(__x86_64__) || defined(_M_X64)
+                    asm volatile("pause" ::: "memory");
+                    #endif
+                }
+
+                trace_read_instr = shared_buffer_ptr->buffer[shared_buffer_ptr->head % SharedBuffer::BUFFER_SIZE];
+                shared_buffer_ptr->head = shared_buffer_ptr->head + 1;
+                read_success = true;
+            }
+            else
+            {
+                if (!fread(&trace_read_instr, instr_size, 1, trace_file))
                 {
-                    cerr << endl << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
-                    cerr << "CPU " << cpu << " trace: " << trace_string << endl;
+                    // reached end of file for this trace
+                    cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl; 
+                    
+                    // close the trace file and re-open it
+                    pclose(trace_file);
+                    trace_file = popen(gunzip_command, "r");
+                    if (trace_file == NULL) 
+                    {
+                        cerr << endl << "*** CANNOT REOPEN TRACE FILE: " << trace_string << " ***" << endl;
+                        cerr << "CPU " << cpu << " trace: " << trace_string << endl;
                         assert(0 && "Failed to reopen trace file after EOF (second read attempt)");
+                    }
+                }
+                else
+                {
+                    read_success = true;
                 }
             }
-            else // successfully read the trace
-            { 
+
+            if (read_success)
+            {
 
                 // enable 50 M skip in 100 M window
                 if(knob::partial_window_trace)
@@ -533,8 +586,12 @@ uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
 
     ROB.entry[index] = *arch_instr;
     ROB.entry[index].event_cycle = current_core_cycle[cpu];
+    ROB.entry[index].dispatch_cycle = current_core_cycle[cpu];
 
     ROB.occupancy++;
+    if (ROB.occupancy == 1) {
+        ROB.entry[index].become_head_cycle = current_core_cycle[cpu];
+    }
     ROB.tail++;
     if (ROB.tail >= ROB.SIZE)
         ROB.tail = 0;
@@ -1521,6 +1578,8 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
             uint32_t fwr_rob_index = LQ.entry[lq_index].rob_index;
             ROB.entry[fwr_rob_index].num_mem_ops--;
             ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
+            ROB.entry[fwr_rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
+            ROB.entry[fwr_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
             if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
                 cerr << "[ROB_ERROR] num_mem_ops underflow in load forwarding: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
                 cerr << " instr_id: " << ROB.entry[fwr_rob_index].instr_id << " rob_index=" << fwr_rob_index << endl;
@@ -1905,6 +1964,8 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
                         uint32_t fwr_rob_index = LQ.entry[lq_index].rob_index;
                         ROB.entry[fwr_rob_index].num_mem_ops--;
                         ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
+                        ROB.entry[fwr_rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
+                        ROB.entry[fwr_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
 #ifdef SANITY_CHECK
                         if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
                             cerr << "[ROB_ERROR] num_mem_ops underflow in RAW resolution: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
@@ -2358,6 +2419,9 @@ void O3_CPU::handle_merged_translation(PACKET *provider)
             LQ.entry[merged].physical_address = (provider->data_pa << LOG2_PAGE_SIZE) | (LQ.entry[merged].virtual_address & ((1 << LOG2_PAGE_SIZE) - 1)); // translated address
             LQ.entry[merged].event_cycle = current_core_cycle[cpu];
 
+            uint32_t merged_rob = LQ.entry[merged].rob_index;
+            ROB.entry[merged_rob].translation_finished_event_cycle = current_core_cycle[cpu];
+
             RTL1[RTL1_tail] = merged;
             RTL1_tail++;
             if (RTL1_tail == LQ_SIZE)
@@ -2396,6 +2460,7 @@ void O3_CPU::handle_merged_load(PACKET *provider)
         }
         ROB.entry[merged_rob_index].num_mem_ops--;
         ROB.entry[merged_rob_index].event_cycle = current_core_cycle[cpu];
+        ROB.entry[merged_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
 
 #ifdef SANITY_CHECK
         if (ROB.entry[merged_rob_index].num_mem_ops < 0) {
@@ -2539,6 +2604,11 @@ void O3_CPU::retire_rob()
             measure_bubble();
         }
 
+        if (ROB.entry[ROB.head].is_load)
+        {
+            accumulate_rob_load_latencies(&ROB.entry[ROB.head]);
+        }
+
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;
 	
@@ -2549,6 +2619,7 @@ void O3_CPU::retire_rob()
         if(ROB.occupancy > 0)
         {
             ROB.entry[ROB.head].rob_head_cycle = current_core_cycle[cpu];
+            ROB.entry[ROB.head].become_head_cycle = current_core_cycle[cpu];
         }
         completed_executions--;
         num_retired++;
@@ -2934,4 +3005,62 @@ void O3_CPU::print_config_ddrp_monitor()
     {
         ddrp_monitor->print_config();
     }
+}
+
+void O3_CPU::accumulate_rob_load_latencies(ooo_model_instr *entry)
+{
+    uint64_t D = entry->dispatch_cycle;
+    uint64_t H = entry->become_head_cycle;
+    uint64_t T = entry->translation_finished_event_cycle;
+    uint64_t F = entry->data_fetch_finished_event_cycle;
+    uint64_t R = current_core_cycle[cpu];
+
+    if (D == UINT64_MAX || H == UINT64_MAX || T == UINT64_MAX || F == UINT64_MAX) {
+        return;
+    }
+
+    uint64_t translation_not_blocked = 0;
+    uint64_t translation_blocked = 0;
+    
+    if (T >= D) {
+        uint64_t min_T_H = std::min(T, H);
+        if (min_T_H >= D) {
+            translation_not_blocked = min_T_H - D;
+        }
+        if (T >= H) {
+            translation_blocked = T - H;
+        }
+    }
+
+    uint64_t data_not_blocked = 0;
+    uint64_t data_blocked = 0;
+    
+    if (F >= T) {
+        uint64_t min_F_H = std::min(F, H);
+        uint64_t max_T_min_F_H = std::max(T, min_F_H);
+        if (max_T_min_F_H >= T) {
+            data_not_blocked = max_T_min_F_H - T;
+        }
+        
+        uint64_t max_F_H = std::max(F, H);
+        uint64_t max_T_H = std::max(T, H);
+        if (max_F_H >= max_T_H) {
+            data_blocked = max_F_H - max_T_H;
+        }
+    }
+
+    uint64_t rob_latency = 0;
+    if (R >= D) {
+        rob_latency = R - D;
+    }
+
+    stats.rob_load_waiting.total_retired_loads++;
+    stats.rob_load_waiting.total_rob_latency += rob_latency;
+    stats.rob_load_waiting.translation_not_blocked += translation_not_blocked;
+    stats.rob_load_waiting.translation_blocked += translation_blocked;
+    stats.rob_load_waiting.data_not_blocked += data_not_blocked;
+    stats.rob_load_waiting.data_blocked += data_blocked;
+
+    rob_load_waiting_translation_blocked_hist.update(translation_blocked);
+    rob_load_waiting_data_blocked_hist.update(data_blocked);
 }
