@@ -23,10 +23,10 @@ def parse_files(exp_path, trace_path):
  
     # 2. Parse Traces
     traces = []
-    blocks = trace_content.split('NAME=')[1:]
+    blocks = trace_content.split('APP_PATH=')[1:]
     for block in blocks:
         lines = block.strip().split('\n')
-        t_info = {'NAME': lines[0].strip()}
+        t_info = {'APP_PATH': lines[0].strip()}
         for l in lines:
             if '=' in l:
                 k, v = l.split('=', 1)
@@ -40,10 +40,15 @@ def parse_files(exp_path, trace_path):
         final_exps[key] = os.path.expandvars(step1)
 
     for t in traces:
-        if 'TRACE' in t:
-            step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), t['TRACE'])
-            t['TRACE'] = os.path.normpath(os.path.expandvars(step1))    
+        if 'APP_PATH' in t:
+            step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), t['APP_PATH'])
+            t['APP_PATH'] = os.path.normpath(os.path.expandvars(step1))    
+        if 'APP_INPUT' in t:
+            step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), t['APP_INPUT'])
+            t['APP_INPUT'] = os.path.normpath(os.path.expandvars(step1))    
     
+    print(traces)
+    exit(0)
     return final_exps, traces
 
 def main():

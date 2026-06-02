@@ -21,25 +21,12 @@ OCP_PERC = --config=$(HERMES_HOME)/config/ocp_hermes.ini
 OCP_HMP_ENSEMBLE = --config=$(HERMES_HOME)/config/ocp_hmp_ensemble.ini
 OCP_TTP = --config=$(HERMES_HOME)/config/ocp_ttp.ini
 OCP_RANDOM = --config=$(HERMES_HOME)/config/ocp_random.ini
+OCP_TRANS = --config=$(HERMES_HOME)/config/ocp_trans.ini --ddrp_req_latency=6
+OCP_ORACLE = --config=$(HERMES_HOME)/config/ocp_trans.ini --ddrp_req_latency=6 --enable_oracle_ptw_pred=true
 
 HERMES_O = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=6
 HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
-# no-prefetching system
-nopref              $(BASE)
-
-# system with prior prefetchers
-pythia              $(BASE) $(PYTHIA)
-
-# Hermes standalone
-hermes_o                $(BASE) $(OCP_PERC) $(HERMES_O)
-hermes_p                $(BASE) $(OCP_PERC) $(HERMES_P)
-
-# Hermes along with Pythia
-pythia_with_hermes_o    $(BASE) $(PYTHIA) $(OCP_PERC) $(HERMES_O)
-pythia_with_hermes_p    $(BASE) $(PYTHIA) $(OCP_PERC) $(HERMES_P)
-
-# HMP and TTP with Pythia
-pythia_with_hmp             $(BASE) $(PYTHIA) $(OCP_HMP_ENSEMBLE) $(HERMES_O)
-pythia_with_ttp              $(BASE) $(PYTHIA) $(OCP_TTP) $(HERMES_O)
-
+normal          $(BASE)
+ocp_oracle      $(BASE) $(OCP_ORACLE)
+ocp_trans       $(BASE) $(OCP_TRANS)
