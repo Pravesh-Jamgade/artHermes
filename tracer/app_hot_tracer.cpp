@@ -12,6 +12,10 @@
 #include <iostream>
 #include <csignal>
 
+/*
+tracer_new.cpp
+*/
+
 #define MAGIC 0x544C425452414345ULL
 #define END_MAGIC 0x1111425411114345ULL
 static constexpr int NUM_INSTR_DESTINATIONS = 2;
@@ -250,7 +254,7 @@ BOOL ShouldWrite(THREADID tid)
     return FALSE;
   }
 
-  return (n >= start && n <= end) ? TRUE : FALSE;
+  return phase_data[window_id].hot == 1 && n >= start && n <= end ? TRUE : FALSE;
 }
 
 
@@ -286,7 +290,7 @@ VOID WriteCurrentInstruction(THREADID tid)
     st->curr.window_id = phase_data[window_id].win_id; 
     
     if(change_phase)
-      fprintf(stderr, "Hot=%d, Win=%ld, Traced=%d\n", st->curr.trace_window, st->curr.window_id, traceable_window);
+      fprintf(stderr, "Hot=%d, Win=%ld, Traced=%ld\n", st->curr.trace_window, st->curr.window_id, traceable_window);
   }
 
   fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);

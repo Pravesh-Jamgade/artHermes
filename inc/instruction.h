@@ -299,7 +299,7 @@ class ooo_model_instr {
 #endif
     };
 
-    ooo_model_instr(uint8_t cpu, context_instr instr)
+    ooo_model_instr(uint8_t cpu, context_instr instr) : ooo_model_instr()
     {
         std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
         std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
@@ -317,7 +317,7 @@ class ooo_model_instr {
         this->record_size =instr.record_size;
     }
     
-    ooo_model_instr(uint8_t cpu, input_instr instr)
+    ooo_model_instr(uint8_t cpu, input_instr instr) : ooo_model_instr()
     {
         std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
         std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
@@ -332,7 +332,7 @@ class ooo_model_instr {
         asid[1] = cpu;
     }
 
-    ooo_model_instr(uint8_t cpu, cloudsuite_instr instr)
+    ooo_model_instr(uint8_t cpu, cloudsuite_instr instr) : ooo_model_instr()
     {
         std::copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::begin(this->destination_registers));
         std::copy(std::begin(instr.destination_memory), std::end(instr.destination_memory), std::begin(this->destination_memory));
@@ -343,7 +343,7 @@ class ooo_model_instr {
         this->is_branch = instr.is_branch;
         this->branch_taken = instr.branch_taken;
 
-        std::copy(std::begin(instr.asid), std::begin(instr.asid), std::begin(this->asid));
+        std::copy(std::begin(instr.asid), std::end(instr.asid), std::begin(this->asid));
     }
 
     string to_string()

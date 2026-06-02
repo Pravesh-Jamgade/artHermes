@@ -31,6 +31,7 @@ namespace knob
     extern uint32_t window_size;
     extern float sleep_frac;
     extern bool enable_app_driven;
+    extern bool enable_libc_buffered;
 }
 
 class load_per_ip_info_t
@@ -61,7 +62,7 @@ public:
 };
 
 // cpu
-struct SharedBuffer;
+class tracereader;
 
 class O3_CPU 
 {
@@ -70,7 +71,7 @@ public:
 
     // trace
     FILE *trace_file;
-    SharedBuffer *shared_buffer_ptr;
+    tracereader *trace_reader;
     char trace_string[1024];
     char gunzip_command[1024];
     IWCounter* interval_counter;
@@ -207,7 +208,7 @@ public:
 
         // trace
         trace_file = NULL;
-        shared_buffer_ptr = NULL;
+        trace_reader = NULL;
 
         interval_counter = new IWCounter(50000000, 0.25); // 50M instructions with 25% sampling
 
@@ -294,6 +295,8 @@ public:
         load_per_ip_stats.clear();
         frontal_load_per_ip_stats.clear();
     }
+
+    ~O3_CPU();
 
     void reset_stats()
     {

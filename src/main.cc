@@ -87,6 +87,7 @@ namespace knob
     extern int itlb_oracle_translation;
     extern bool knob_doa_predictor;
     extern bool enable_app_driven;
+    extern bool enable_libc_buffered;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -1578,6 +1579,8 @@ int main(int argc, char** argv)
     int count_traces = 0;
     if (knob::enable_app_driven) {
         cout << "Running in Application-driven mode (Intel Pintool shared buffer)" << endl;
+    } else if (knob::enable_libc_buffered) {
+        cout << "Running in Application-driven mode (Libc-managed buffered pipe/file)" << endl;
     }
     cout << endl;
 
@@ -1587,7 +1590,7 @@ int main(int argc, char** argv)
         if (found_traces)
         {
             if (knob::enable_app_driven) {
-                printf("CPU_%d reads shared buffer path: %s\n", count_traces, argv[i]);
+                printf("CPU_%d reads trace path: %s\n", count_traces, argv[i]);
                 sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
                 ooo_cpu[count_traces].trace_file = NULL;
             } else {
@@ -1596,71 +1599,65 @@ int main(int argc, char** argv)
                 sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
                 cout << " SSSSSSSSSSSSSS"  << ooo_cpu[count_traces].trace_string << '\n';
 
-                std::string full_name(argv[i]);
-                std::string last_dot = full_name.substr(full_name.find_last_of("."));
+                // std::string full_name(argv[i]);
+                // std::string last_dot = full_name.substr(full_name.find_last_of("."));
 
-                std::string fmtstr;
-                std::string decomp_program;
-                if (full_name.substr(0,4) == "http")
-                {
-                    // Check file exists
-                    char testfile_command[4096];
-                    sprintf(testfile_command, "wget -q --spider %s", argv[i]);
-                    FILE *testfile = popen(testfile_command, "r");
-                    if (pclose(testfile))
-                    {
-                        std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                        assert(0 && "Remote trace file does not exist or is inaccessible");
-                    }
-                    fmtstr = "wget -qO- %2$s | %1$s -dc";
-                }
-                else
-                {
-                    std::ifstream testfile(argv[i]);
-                    if (!testfile.good())
-                    {
-                        std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                        assert(0 && "Local trace file does not exist or is not readable");
-                    }
-                    fmtstr = "%1$s -dc %2$s";
-                }
+                // std::string fmtstr;
+                // std::string decomp_program;
+                // if (full_name.substr(0,4) == "http")
+                // {
+                //     // Check file exists
+                //     char testfile_command[4096];
+                //     sprintf(testfile_command, "wget -q --spider %s", argv[i]);
+                //     FILE *testfile = popen(testfile_command, "r");
+                //     if (pclose(testfile))
+                //     {
+                //         std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                //         assert(0 && "Remote trace file does not exist or is inaccessible");
+                //     }
+                //     fmtstr = "wget -qO- %2$s | %1$s -dc";
+                // }
+                // else
+                // {
+                //     std::ifstream testfile(argv[i]);
+                //     if (!testfile.good())
+                //     {
+                //         std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
+                //         assert(0 && "Local trace file does not exist or is not readable");
+                //     }
+                //     fmtstr = "%1$s -dc %2$s";
+                // }
 
-                if (last_dot[1] == 'g') // gzip format
-                    decomp_program = "gzip";
-                else if (last_dot[1] == 'x') // xz
-                    decomp_program = "xz";
-                else {
-                    std::cout << "ChampSim does not support traces other than gz or xz compression!" << std::endl;
-                    assert(0);
-                }
+                // if (last_dot[1] == 'g') // gzip format
+                //     decomp_program = "gzip";
+                // else if (last_dot[1] == 'x') // xz
+                //     decomp_program = "xz";
+                // else {
+                //     std::cout << "ChampSim does not support traces other than gz or xz compression!" << std::endl;
+                //     assert(0);
+                // }
 
-                sprintf(ooo_cpu[count_traces].gunzip_command, fmtstr.c_str(), decomp_program.c_str(), argv[i]);
+                // sprintf(ooo_cpu[count_traces].gunzip_command, fmtstr.c_str(), decomp_program.c_str(), argv[i]);
 
-                char *pch[100];
-                int count_str = 0;
-                pch[0] = strtok (argv[i], " /,.-");
-                while (pch[count_str] != NULL) {
-                    //printf ("%s %d\n", pch[count_str], count_str);
-                    count_str++;
-                    pch[count_str] = strtok (NULL, " /,.-");
-                }
+                // char *pch[100];
+                // int count_str = 0;
+                // pch[0] = strtok (argv[i], " /,.-");
+                // while (pch[count_str] != NULL) {
+                //     //printf ("%s %d\n", pch[count_str], count_str);
+                //     count_str++;
+                //     pch[count_str] = strtok (NULL, " /,.-");
+                // }
 
-                //printf("max count_str: %d\n", count_str);
-                //printf("application: %s\n", pch[count_str-3]);
+                // //printf("max count_str: %d\n", count_str);
+                // //printf("application: %s\n", pch[count_str-3]);
 
-                int j = 0;
-                while (pch[count_str-3][j] != '\0') {
-                    seed_number += pch[count_str-3][j];
-                    //printf("%c %d %d\n", pch[count_str-3][j], j, seed_number);
-                    j++;
-                }
-
-                ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
-                if (ooo_cpu[count_traces].trace_file == NULL) {
-                    printf("\n*** Trace file not found: %s ***\n", argv[i]);
-                    printf("Command: %s\n", ooo_cpu[count_traces].gunzip_command);
-                    assert(0 && "Failed to open trace file with popen");
-                }
+                // int j = 0;
+                // while (pch[count_str-3][j] != '\0') {
+                //     seed_number += pch[count_str-3][j];
+                //     //printf("%c %d %d\n", pch[count_str-3][j], j, seed_number);
+                //     j++;
+                // }
+                ooo_cpu[count_traces].trace_file = NULL;
             }
 
             count_traces++;

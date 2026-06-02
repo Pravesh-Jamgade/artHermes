@@ -1,14 +1,17 @@
 #include "tracereader.h"
 
 #include <cassert>
+#include <vector>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <cerrno>
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstddef>
@@ -31,9 +34,9 @@ static_assert(offsetof(context_instr, trace_window) == 84);
 
 extern int KNOB_LIVE_INPUT;
 
-tracereader::tracereader(uint8_t cpu, std::string _ts, bool live_trace) : cpu(cpu), trace_string(_ts), live_trace(live_trace)
+tracereader::tracereader(uint8_t cpu, std::string _ts, bool app_driven) : cpu(cpu), trace_string(_ts), app_driven(app_driven)
 {
-  if(!live_trace)
+  if(!app_driven)
   {
     std::string last_dot = trace_string.substr(trace_string.find_last_of("."));
 
@@ -69,14 +72,14 @@ tracereader::tracereader(uint8_t cpu, std::string _ts, bool live_trace) : cpu(cp
     }
     trace_open(trace_string);
   }
-  else
-  {
-    trace_file = fopen(trace_string.c_str(), "r");
-    if (trace_file == NULL) {
-      std::cerr << std::endl << "*** CANNOT OPEN TRACE FILE: " << trace_string << " ***" << std::endl;
-      assert(0);
-    }
-  }
+  // else
+  // {
+  //   trace_file = fopen(trace_string.c_str(), "r");
+  //   if (trace_file == NULL) {
+  //     std::cerr << std::endl << "*** CANNOT OPEN TRACE FILE: " << trace_string << " ***" << std::endl;
+  //     assert(0);
+  //   }
+  // }
   
 }
 
@@ -87,7 +90,7 @@ ooo_model_instr tracereader::read_single_instr()
 {
   
   T trace_read_instr;
-  if(!live_trace)
+  if(!app_driven)
   {
     while (!fread(&trace_read_instr, sizeof(T), 1, trace_file)) {
       // reached end of file for this trace
@@ -186,12 +189,12 @@ public:
 
   ooo_model_instr get()
   {
-    ooo_model_instr trace_read_instr = read_single_instr<cloudsuite_instr>();
-
     if (!initialized) {
-      last_instr = trace_read_instr;
+      last_instr = read_single_instr<cloudsuite_instr>();
       initialized = true;
     }
+
+    ooo_model_instr trace_read_instr = read_single_instr<cloudsuite_instr>();
 
     last_instr.branch_target = trace_read_instr.ip;
     ooo_model_instr retval = last_instr;
@@ -207,17 +210,17 @@ class input_tracereader : public tracereader
   bool initialized = false;
 
 public:
-  input_tracereader(uint8_t cpu, std::string _tn, bool live_traces) : tracereader(cpu, _tn, live_traces) {}
+  input_tracereader(uint8_t cpu, std::string _tn) : tracereader(cpu, _tn) {}
 
   
   ooo_model_instr get()
   {
-    ooo_model_instr trace_read_instr = read_single_instr<input_instr>();
-
     if (!initialized) {
-      last_instr = trace_read_instr;
+      last_instr = read_single_instr<input_instr>();
       initialized = true;
     }
+
+    ooo_model_instr trace_read_instr = read_single_instr<input_instr>();
 
     last_instr.branch_target = trace_read_instr.ip;
     ooo_model_instr retval = last_instr;
@@ -238,11 +241,12 @@ public:
   
   ooo_model_instr get()
   {
-    ooo_model_instr trace_read_instr = read_single_instr<context_instr>();
     if (!initialized) {
-      last_instr = trace_read_instr;
+      last_instr = read_single_instr<context_instr>();
       initialized = true;
     }
+
+    ooo_model_instr trace_read_instr = read_single_instr<context_instr>();
       
     last_instr.branch_target = trace_read_instr.ip;
     ooo_model_instr retval = last_instr;
@@ -252,14 +256,168 @@ public:
   }
 };
 
-tracereader* get_tracereader(std::string fname, uint8_t cpu, bool is_cloudsuite, bool live_traces)
+namespace knob {
+  extern bool enable_app_driven;
+  extern bool enable_libc_buffered;
+  extern bool enable_shmem_buffered;
+}
+
+class libc_buffered_tracereader : public tracereader
+{
+  ooo_model_instr last_instr;
+  bool initialized = false;
+  std::vector<char> buffer;
+
+public:
+  libc_buffered_tracereader(uint8_t cpu, std::string _tn) : tracereader(cpu, _tn, true)
+  {
+    // open the trace file (this could be a FIFO or regular file)
+    trace_file = fopen(trace_string.c_str(), "rb");
+    if (!trace_file) {
+      std::cerr << "Failed to open trace file/FIFO: " << trace_string << " (errno=" << errno << ")" << std::endl;
+      std::exit(1);
+    }
+    // Set libc buffer strategy matching the producer (e.g. 1MB buffer)
+    buffer.resize(1 << 20); // 1MB buffer
+    if (setvbuf(trace_file, buffer.data(), _IOFBF, buffer.size()) != 0) {
+      std::cerr << "Failed to setvbuf on trace file/FIFO" << std::endl;
+    }
+  }
+
+  ~libc_buffered_tracereader()
+  {
+    if (trace_file) {
+      fclose(trace_file);
+      trace_file = nullptr;
+    }
+  }
+
+  ooo_model_instr read_helper()
+  {
+    context_instr trace_read_instr{};
+    size_t read_bytes = fread(&trace_read_instr, sizeof(context_instr), 1, trace_file);
+    if (read_bytes != 1) {
+      if (feof(trace_file)) {
+        std::cerr << "Reached end of trace file/FIFO cleanly (EOF)." << std::endl;
+        std::exit(0);
+      } else {
+        std::cerr << "Error reading trace file/FIFO (errno=" << errno << ")" << std::endl;
+        std::exit(1);
+      }
+    }
+
+    if (trace_read_instr.magic == 0x1111425411114345ULL) { // END_MAGIC
+      std::cerr << "Reached end of trace file/FIFO cleanly (END_MAGIC)." << std::endl;
+      std::exit(0);
+    }
+
+    if (trace_read_instr.magic != 0x544C425452414345ULL) { // MAGIC
+      std::cerr << "Bad magic: stream not aligned / stdout contaminated. Read: 0x" 
+                << std::hex << trace_read_instr.magic << std::dec << std::endl;
+    }
+
+    return ooo_model_instr(cpu, trace_read_instr);
+  }
+
+  ooo_model_instr get() override
+  {
+    if (!initialized) {
+      last_instr = read_helper();
+      initialized = true;
+    }
+
+    ooo_model_instr trace_read_instr = read_helper();
+
+    last_instr.branch_target = trace_read_instr.ip;
+    ooo_model_instr retval = last_instr;
+
+    last_instr = trace_read_instr;
+    return retval;
+  }
+};
+
+struct SharedBuffer {
+    volatile uint64_t head = 0;
+    volatile uint64_t tail = 0;
+    static constexpr size_t BUFFER_SIZE = 1024;
+    context_instr buffer[BUFFER_SIZE];
+};
+
+class shmem_buffered : public tracereader
+{
+  SharedBuffer *shared_buffer_ptr = nullptr;
+  ooo_model_instr last_instr;
+  bool initialized = false;
+
+public:
+  shmem_buffered(uint8_t cpu, std::string _tn) : tracereader(cpu, _tn, true)
+  {
+    int shm_fd = shm_open(trace_string.c_str(), O_RDWR, 0666);
+    if (shm_fd < 0) {
+      std::cerr << "Failed to open shared memory: " << trace_string << " (errno=" << errno << ")" << std::endl;
+      std::exit(1);
+    }
+    shared_buffer_ptr = (SharedBuffer*)mmap(NULL, sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shared_buffer_ptr == MAP_FAILED) {
+      std::cerr << "Failed to mmap shared memory: " << trace_string << " (errno=" << errno << ")" << std::endl;
+      std::exit(1);
+    }
+    ::close(shm_fd);
+  }
+
+  ~shmem_buffered()
+  {
+    if (shared_buffer_ptr && shared_buffer_ptr != MAP_FAILED) {
+      munmap(shared_buffer_ptr, sizeof(SharedBuffer));
+    }
+  }
+
+  ooo_model_instr read_helper()
+  {
+    while (shared_buffer_ptr->head == shared_buffer_ptr->tail) {
+      #if defined(__x86_64__) || defined(_M_X64)
+      asm volatile("pause" ::: "memory");
+      #endif
+    }
+
+    context_instr trace_read_instr = shared_buffer_ptr->buffer[shared_buffer_ptr->head % SharedBuffer::BUFFER_SIZE];
+    shared_buffer_ptr->head = shared_buffer_ptr->head + 1;
+
+    return ooo_model_instr(cpu, trace_read_instr);
+  }
+
+  ooo_model_instr get() override
+  {
+    if (!initialized) {
+      last_instr = read_helper();
+      initialized = true;
+    }
+
+    ooo_model_instr trace_read_instr = read_helper();
+
+    last_instr.branch_target = trace_read_instr.ip;
+    ooo_model_instr retval = last_instr;
+
+    last_instr = trace_read_instr;
+    return retval;
+  }
+};
+
+tracereader* get_tracereader(std::string fname, uint8_t cpu, bool is_cloudsuite)
 {
   if (is_cloudsuite) {
     return new cloudsuite_tracereader(cpu, fname);
-  } else if(live_traces){
-    return new context_tracereader(cpu, fname, live_traces);
+  } else if (knob::enable_app_driven) {
+    if(knob::enable_shmem_buffered)
+    {
+      return new shmem_buffered(cpu, fname);
+    }
+    else if(knob::enable_libc_buffered)
+    {
+      return new libc_buffered_tracereader(cpu, fname);
+    }
   }
   else {
-    return new input_tracereader(cpu, fname, live_traces);
+    return new input_tracereader(cpu, fname);
   }
 }

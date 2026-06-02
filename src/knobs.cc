@@ -441,6 +441,10 @@ namespace knob
 
 	// When true: read traces from shared memory on-the-fly (Intel Pintool application-driven mode)
 	bool enable_app_driven = false;
+
+	// When true: read traces using libc managed buffer strategy (FIFO/file with setvbuf)
+	bool enable_libc_buffered = false;
+	bool enable_shmem_buffered = false;
 }
 
 std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
@@ -1953,6 +1957,14 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "enable_app_driven"))
 	{
 		knob::enable_app_driven = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "enable_libc_buffered"))
+	{
+		knob::enable_libc_buffered = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "enable_shmem_buffered"))
+	{
+		knob::enable_shmem_buffered = !strcmp(value, "true") ? true : false;
 	}
 	else if (MATCH("", "ddrp_monitor_exploit_epoch"))
 	{
