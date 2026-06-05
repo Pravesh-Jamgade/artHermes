@@ -189,12 +189,6 @@ def main():
 
     print(f"Total traces: {len(traces)} | configs: {len(configs)}")
     
-    # Create config folders
-    for c_name, c_flags in configs.items():
-        absolute_dir = os.path.join(args.outdir, c_name)
-        if not os.path.exists(absolute_dir):
-            os.makedirs(absolute_dir)
-    
     # Prepare all tasks
     task_queue = []
     runjobs_log_path = os.path.join(args.outdir, "runjobs.log")
@@ -205,10 +199,12 @@ def main():
             repeated_traces = " ".join(t['TRACES'])
 
             for c_name, c_flags in configs.items():
-                absolute_dir = os.path.join(args.outdir, c_name)
+                core_dir = os.path.join(args.outdir, c_name, f"{cores}core")
+                if not os.path.exists(core_dir):
+                    os.makedirs(core_dir)
 
                 run_name = f"{t['NAME']}_{c_name}"
-                log_file = os.path.join(absolute_dir, f"{run_name}.log")
+                log_file = os.path.join(core_dir, f"{run_name}.log")
 
                 cmd = (
                     f"{bin_path} --warmup_instructions={args.warm} "
