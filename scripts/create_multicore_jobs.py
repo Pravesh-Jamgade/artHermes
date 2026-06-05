@@ -58,7 +58,7 @@ def parse_files(exp_path, trace_path):
 
     for t in traces:
         if 'TRACE' in t:
-            raw_paths = t['TRACE'].split()
+            raw_paths = t['TRACE'].split(',')
             resolved_paths = []
             for rpath in raw_paths:
                 step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), rpath)
@@ -120,73 +120,65 @@ def main():
             
         bin_prefix = f"{expected_prefix}-{cores}core-"
         
-        # Check if any tagged binary exists matching the prefix
-        existing_bins = []
-        if os.path.exists(bin_dir):
-            existing_bins = [f for f in os.listdir(bin_dir) if f.startswith(bin_prefix)]
+        # # Check if any tagged binary exists matching the prefix
+        # existing_bins = []
+        # if os.path.exists(bin_dir):
+        #     existing_bins = [f for f in os.listdir(bin_dir) if f.startswith(bin_prefix)]
+        
+        print(f"[WARN] ==> Building it now for {cores} cores... <==")
+        build_script = os.path.join(hermes_home, "build_champsim.sh")
+        if os.path.exists(build_script):
+            # Parse build options from the prefix
+            if len(parts) == 5:
+                uarch, l1d, l2c, llc, repl = parts
+            elif len(parts) == 7:
+                uarch = parts[0]
+                l1d = parts[3]
+                l2c = parts[4]
+                llc = parts[5]
+                repl = parts[6]
+            else:
+                uarch = parts[0] if len(parts) > 0 else "glc"
+                l1d = parts[1] if len(parts) > 1 else "multi"
+                l2c = parts[2] if len(parts) > 2 else "multi"
+                llc = parts[3] if len(parts) > 3 else "multi"
+                repl = parts[4] if len(parts) > 4 else "multi"
             
-        if existing_bins:
-            # Sort by modification time to get the newest one
-            existing_bins.sort(key=lambda x: os.path.getmtime(os.path.join(bin_dir, x)), reverse=True)
-            bin_name = existing_bins[0]
-            bin_path = os.path.join(bin_dir, bin_name)
-            print(f"[INFO] Found existing tagged binary: {bin_name}")
+            dram_ch = "2" if int(cores) > 1 else "1"
+            log_dram_ch = "1" if int(cores) > 1 else "0"
+            
+            build_cmd = [build_script, uarch, l1d, l2c, llc, repl, str(cores), dram_ch, log_dram_ch]
+            print(f"[INFO] Executing: {' '.join(build_cmd)}")
+            
+            res = subprocess.run(build_cmd, cwd=hermes_home, capture_output=True, text=True)
+            
+            # Search for "Binary: bin/<name>" in build output
+            match = re.search(r'Binary:\s*bin/(\S+)', res.stdout)
+            if match:
+                compiled_bin_name = match.group(1)
+            else:
+                compiled_bin_name = f"{expected_prefix}-{cores}core-{dram_ch}ch"
+                print(f"[WARN] Could not find binary name in build output. Defaulting to: {compiled_bin_name}")
+            
+            original_bin_path = os.path.join(bin_dir, compiled_bin_name)
+            
+            if res.returncode != 0 or not os.path.exists(original_bin_path):
+                print("--- STDOUT ---")
+                print(res.stdout)
+                print("--- STDERR ---")
+                print(res.stderr)
+                print(f"[ERROR] Failed to compile binary. retcode {res.returncode} and {original_bin_path} exists: {os.path.exists(original_bin_path)} ")
+                sys.exit(1)
+            
+            tag = get_random_tag()
+            tagged_bin_name = f"{compiled_bin_name}-{tag}"
+            bin_path = os.path.join(bin_dir, tagged_bin_name)
+            os.rename(original_bin_path, bin_path)
+            print(f"[SUCCESS] Compilation completed and binary renamed to {tagged_bin_name}")
             cores_to_bin_path[cores] = bin_path
         else:
-            print(f"[WARN] No binary starting with {bin_prefix} found. Building it now for {cores} cores...")
-            build_script = os.path.join(hermes_home, "build_champsim.sh")
-            if os.path.exists(build_script):
-                # Parse build options from the prefix
-                if len(parts) == 5:
-                    uarch, l1d, l2c, llc, repl = parts
-                elif len(parts) == 7:
-                    uarch = parts[0]
-                    l1d = parts[3]
-                    l2c = parts[4]
-                    llc = parts[5]
-                    repl = parts[6]
-                else:
-                    uarch = parts[0] if len(parts) > 0 else "glc"
-                    l1d = parts[1] if len(parts) > 1 else "multi"
-                    l2c = parts[2] if len(parts) > 2 else "multi"
-                    llc = parts[3] if len(parts) > 3 else "multi"
-                    repl = parts[4] if len(parts) > 4 else "multi"
-                
-                dram_ch = "2" if int(cores) > 1 else "1"
-                log_dram_ch = "1" if int(cores) > 1 else "0"
-                
-                build_cmd = [build_script, uarch, l1d, l2c, llc, repl, str(cores), dram_ch, log_dram_ch]
-                print(f"[INFO] Executing: {' '.join(build_cmd)}")
-                
-                res = subprocess.run(build_cmd, cwd=hermes_home, capture_output=True, text=True)
-                
-                # Search for "Binary: bin/<name>" in build output
-                match = re.search(r'Binary:\s*bin/(\S+)', res.stdout)
-                if match:
-                    compiled_bin_name = match.group(1)
-                else:
-                    compiled_bin_name = f"{expected_prefix}-{cores}core-{dram_ch}ch"
-                    print(f"[WARN] Could not find binary name in build output. Defaulting to: {compiled_bin_name}")
-                
-                original_bin_path = os.path.join(bin_dir, compiled_bin_name)
-                
-                if res.returncode != 0 or not os.path.exists(original_bin_path):
-                    print("--- STDOUT ---")
-                    print(res.stdout)
-                    print("--- STDERR ---")
-                    print(res.stderr)
-                    print(f"[ERROR] Failed to compile binary. retcode {res.returncode} and {original_bin_path} exists: {os.path.exists(original_bin_path)} ")
-                    sys.exit(1)
-                
-                tag = get_random_tag()
-                tagged_bin_name = f"{compiled_bin_name}-{tag}"
-                bin_path = os.path.join(bin_dir, tagged_bin_name)
-                os.rename(original_bin_path, bin_path)
-                print(f"[SUCCESS] Compilation completed and binary renamed to {tagged_bin_name}")
-                cores_to_bin_path[cores] = bin_path
-            else:
-                print(f"[ERROR] Build script {build_script} not found.")
-                sys.exit(1)
+            print(f"[ERROR] Build script {build_script} not found.")
+            sys.exit(1)
 
     print(f"Total traces: {len(traces)} | configs: {len(configs)}")
     
