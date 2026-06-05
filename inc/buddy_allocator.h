@@ -11,9 +11,9 @@
 #include <string>
 
 #define PAGE_FAULT_LATENCY   1000                   // cycles added on first access to a page
-#define BUDDY_MAX_ORDER      20                     // supports up to 2^20 pages (4GB at 4KB/page)
 #define BUDDY_RESERVED_PAGES ((1ULL << 30) / 4096) // 1GB reserved region: pages 0..262143 are off-limits
 
+inline int BUDDY_MAX_ORDER = 20;     // supports up to 2^20 pages (4GB at 4KB/page)
 // ---------------------------------------------------------------------------
 // Shadow page-table structure
 //
@@ -57,7 +57,7 @@ struct ShadowPTPage {
 
 struct BuddyAllocator {
     uint64_t total_pages;
-    std::unordered_set<uint64_t> free_lists[BUDDY_MAX_ORDER + 1]; // free_lists[i] = base addrs of free 2^i-page blocks
+    std::unordered_set<uint64_t> free_lists[100]; // free_lists[i] = base addrs of free 2^i-page blocks
     std::unordered_set<uint64_t> allocated;       // resident physical frames
     std::deque<uint64_t>         alloc_fifo;      // FIFO order for physical frame eviction
     std::unordered_map<uint64_t, uint64_t> vpage_to_pframe; // vpage → pframe (data-page residency)

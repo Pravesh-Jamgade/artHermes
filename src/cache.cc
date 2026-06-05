@@ -274,8 +274,8 @@ void CACHE::handle_fill()
                 }
             }
 
-	        if(warmup_complete[fill_cpu] && (MSHR.entry[mshr_index].cycle_enqueued != 0))
-	        {
+            if(warmup_complete[fill_cpu] && (MSHR.entry[mshr_index].cycle_enqueued != 0))
+            {
                 uint64_t current_miss_latency = (current_core_cycle[fill_cpu] - MSHR.entry[mshr_index].cycle_enqueued);
                 total_miss_latency += current_miss_latency;
             }
@@ -494,9 +494,9 @@ void CACHE::handle_fill()
                 }
             }
 
-	        if(warmup_complete[fill_cpu] && (MSHR.entry[mshr_index].cycle_enqueued != 0))
-	        {
-		        uint64_t current_miss_latency = (current_core_cycle[fill_cpu] - MSHR.entry[mshr_index].cycle_enqueued);
+            if(warmup_complete[fill_cpu] && (MSHR.entry[mshr_index].cycle_enqueued != 0))
+            {
+                uint64_t current_miss_latency = (current_core_cycle[fill_cpu] - MSHR.entry[mshr_index].cycle_enqueued);
                 /*
                 if(cache_type == IS_L1D)
                 {
@@ -504,8 +504,8 @@ void CACHE::handle_fill()
                 }
                 */
                 total_miss_latency += current_miss_latency;
-	        }
-	  
+            }
+      
             MSHR.remove_queue(&MSHR.entry[mshr_index]);
             MSHR.num_returned--;
 

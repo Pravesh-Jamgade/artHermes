@@ -84,6 +84,10 @@ void print_core_config()
 
 void O3_CPU::read_from_trace()
 {
+    if (trace_reader && trace_reader->eof()) {
+        return;
+    }
+
     // actual processors do not work like this but for easier implementation,
     // we read instruction traces and virtually add them in the ROB
     // note that these traces are not yet translated and fetched 
@@ -2153,7 +2157,7 @@ void O3_CPU::handle_merged_translation(PACKET *provider)
 	ITERATE_SET(merged, provider->sq_index_depend_on_me, SQ.SIZE) {
             SQ.entry[merged].translated = COMPLETED;
             SQ.entry[merged].physical_address = (provider->data_pa << LOG2_PAGE_SIZE) | (SQ.entry[merged].virtual_address & ((1 << LOG2_PAGE_SIZE) - 1)); // translated address
-            SQ.entry[merged].event_cycle = current_core_cycle[cpu];
+            SQ.entry[merged].event_cycle = provider->event_cycle;
 
             RTS1[RTS1_tail] = merged;
             RTS1_tail++;
@@ -2170,10 +2174,10 @@ void O3_CPU::handle_merged_translation(PACKET *provider)
 	ITERATE_SET(merged, provider->lq_index_depend_on_me, LQ.SIZE) {
             LQ.entry[merged].translated = COMPLETED;
             LQ.entry[merged].physical_address = (provider->data_pa << LOG2_PAGE_SIZE) | (LQ.entry[merged].virtual_address & ((1 << LOG2_PAGE_SIZE) - 1)); // translated address
-            LQ.entry[merged].event_cycle = current_core_cycle[cpu];
+            LQ.entry[merged].event_cycle = provider->event_cycle;
 
             uint32_t merged_rob = LQ.entry[merged].rob_index;
-            ROB.entry[merged_rob].translation_finished_event_cycle = current_core_cycle[cpu];
+            ROB.entry[merged_rob].translation_finished_event_cycle = provider->event_cycle;
 
             RTL1[RTL1_tail] = merged;
             RTL1_tail++;
@@ -2206,14 +2210,14 @@ void O3_CPU::handle_merged_load(PACKET *provider)
         uint32_t merged_rob_index = LQ.entry[merged].rob_index;
 
         LQ.entry[merged].fetched = COMPLETED;
-        LQ.entry[merged].event_cycle = current_core_cycle[cpu];
+        LQ.entry[merged].event_cycle = provider->event_cycle;
         if (knob::offchip_pred_mark_merged_load)
         {
             LQ.entry[merged].went_offchip = LQ.entry[provider->lq_index].went_offchip; // if provider went offchip, mark merged LQ entry offchip
         }
         ROB.entry[merged_rob_index].num_mem_ops--;
-        ROB.entry[merged_rob_index].event_cycle = current_core_cycle[cpu];
-        ROB.entry[merged_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
+        ROB.entry[merged_rob_index].event_cycle = provider->event_cycle;
+        ROB.entry[merged_rob_index].data_fetch_finished_event_cycle = provider->event_cycle;
 
 #ifdef SANITY_CHECK
         if (ROB.entry[merged_rob_index].num_mem_ops < 0) {

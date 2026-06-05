@@ -1,5 +1,6 @@
 #include "buddy_allocator.h"
 #include "logging.h"
+#include <cmath>
 
 // Global instance
 BuddyAllocator buddy_allocator;
@@ -17,8 +18,13 @@ BuddyAllocator buddy_allocator;
 //   (Total: 2^18+2^19 = 3/4 of DRAM, all properly aligned)
 void BuddyAllocator::init(uint64_t num_pages)
 {
-    static_assert((uint64_t)DRAM_PAGES <= (1ULL << BUDDY_MAX_ORDER),
-        "BUDDY_MAX_ORDER too small for DRAM_PAGES — increase BUDDY_MAX_ORDER");
+    // static_assert((uint64_t)DRAM_PAGES <= (1ULL << BUDDY_MAX_ORDER),
+    //     "BUDDY_MAX_ORDER too small for DRAM_PAGES — increase BUDDY_MAX_ORDER");
+
+    if((uint64_t)DRAM_PAGES > (1ULL << BUDDY_MAX_ORDER))
+    {
+        BUDDY_MAX_ORDER = log(DRAM_PAGES);
+    }
     total_pages = num_pages;
     // Skip [0, BUDDY_RESERVED_PAGES) so reserved frames never enter the free lists.
     uint64_t start = BUDDY_RESERVED_PAGES;

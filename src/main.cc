@@ -88,6 +88,7 @@ namespace knob
     extern bool knob_doa_predictor;
     extern bool enable_app_driven;
     extern bool enable_libc_buffered;
+    extern bool enable_shmem_buffered;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -1519,16 +1520,82 @@ void signal_handler(int signal)
         print_deadlock(i);
     }
 }
-void register_signal(int signal)
+void print_final_stats()
 {
-  struct sigaction sa;
-  sa.sa_handler = signal_handler;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = 0;
-  if (sigaction(signal, &sa, NULL) == -1) {
-    perror("sigaction");
-    std::exit(EXIT_FAILURE);
-  }
+    // Populate stats for unfinished CPUs and record stats
+    extern uint64_t current_core_cycle[NUM_CPUS];
+    for (uint32_t i = 0; i < NUM_CPUS; i++) {
+        if (simulation_complete[i] == 0) {
+            simulation_complete[i] = 1;
+            ooo_cpu[i].finish_sim_instr = ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr;
+            ooo_cpu[i].finish_sim_cycle = current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle;
+
+            record_roi_stats(i, &ooo_cpu[i].ITLB);
+            record_roi_stats(i, &ooo_cpu[i].DTLB);
+            record_roi_stats(i, &ooo_cpu[i].STLB);
+            record_roi_stats(i, &ooo_cpu[i].L1D);
+            record_roi_stats(i, &ooo_cpu[i].L1I);
+            record_roi_stats(i, &ooo_cpu[i].L2C);
+            record_roi_stats(i, &uncore.LLC);
+        }
+    }
+
+    cout << endl << "ChampSim completed all CPUs" << endl;
+
+    cout << endl << "Region of Interest Statistics" << endl;
+    for (uint32_t i = 0; i < NUM_CPUS; i++) {
+        float ipc = 0.0;
+        if (ooo_cpu[i].finish_sim_cycle > 0) {
+            ipc = (float)ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle;
+        }
+        cout << "Core_" << i << "_cumulative_IPC " << ipc << endl
+             << "Core_" << i << "_total_instructions " << ooo_cpu[i].finish_sim_instr << endl
+             << "Core_" << i << "_cycles " << ooo_cpu[i].finish_sim_cycle << endl
+             << endl;
+
+        print_core_roi_stats(i);
+
+#ifndef CRC2_COMPILE
+        print_roi_stats(i, &ooo_cpu[i].ITLB);
+        print_roi_stats(i, &ooo_cpu[i].DTLB);
+        print_roi_stats(i, &ooo_cpu[i].STLB);
+        print_roi_stats(i, &ooo_cpu[i].L1D);
+        print_roi_stats(i, &ooo_cpu[i].L1I);
+        print_roi_stats(i, &ooo_cpu[i].L2C);
+#endif
+        print_roi_stats(i, &uncore.LLC);
+        print_addr_translation_stats(i);
+    }
+
+    for (uint32_t i = 0; i < NUM_CPUS; i++) {
+        ooo_cpu[i].l1i_prefetcher_final_stats();
+        ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
+        ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
+    }
+
+    uncore.LLC.llc_prefetcher_final_stats();
+
+#ifndef CRC2_COMPILE
+    uncore.LLC.llc_replacement_final_stats();
+    print_branch_stats();
+    print_dram_stats();
+#endif
+
+    for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
+        if (knob::enable_offchip_tracing) {
+            ooo_cpu[cpu].tracer.fini_tracing();
+        }
+        if (knob::l2c_dump_access_trace) {
+            ooo_cpu[cpu].L2C.tracer.fini_tracing();
+        }
+        if (ooo_cpu[cpu].page_table_walker) {
+            delete ooo_cpu[cpu].page_table_walker;
+            ooo_cpu[cpu].page_table_walker = nullptr;
+        }
+    }
+    if (knob::llc_dump_access_trace) {
+        uncore.LLC.tracer.fini_tracing();
+    }
 }
 
 int main(int argc, char** argv)
@@ -1577,12 +1644,6 @@ int main(int argc, char** argv)
     // search through the argv for "-traces"
     int found_traces = 0;
     int count_traces = 0;
-    if (knob::enable_app_driven) {
-        cout << "Running in Application-driven mode (Intel Pintool shared buffer)" << endl;
-    } else if (knob::enable_libc_buffered) {
-        cout << "Running in Application-driven mode (Libc-managed buffered pipe/file)" << endl;
-    }
-    cout << endl;
 
     vector<tracereader*> traces;
 
@@ -1951,26 +2012,47 @@ int main(int argc, char** argv)
             */
             
             // simulation complete
-            if ((all_warmup_complete > NUM_CPUS) && (simulation_complete[i] == 0) && (ooo_cpu[i].num_retired >= (ooo_cpu[i].begin_sim_instr + ooo_cpu[i].simulation_instructions))) 
+            bool trace_ended = (ooo_cpu[i].trace_reader && ooo_cpu[i].trace_reader->eof());
+            bool core_drained = (ooo_cpu[i].IFETCH_BUFFER.occupancy == 0) && 
+                                (ooo_cpu[i].DECODE_BUFFER.occupancy == 0) && 
+                                (ooo_cpu[i].ROB.occupancy == 0) && 
+                                (ooo_cpu[i].LQ.occupancy == 0) && 
+                                (ooo_cpu[i].SQ.occupancy == 0);
+
+            if (simulation_complete[i] == 0)
             {
-                simulation_complete[i] = 1;
-                ooo_cpu[i].finish_sim_instr = ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr;
-                ooo_cpu[i].finish_sim_cycle = current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle;
+                if (trace_ended && core_drained && (all_warmup_complete <= NUM_CPUS))
+                {
+                    // Force warmup completion
+                    for (int c = 0; c < NUM_CPUS; c++) {
+                        warmup_complete[c] = 1;
+                    }
+                    all_warmup_complete = NUM_CPUS + 1;
+                    finish_warmup();
+                }
 
-                cout << "Finished CPU " << i << " instructions: " << ooo_cpu[i].finish_sim_instr << " cycles: " << ooo_cpu[i].finish_sim_cycle;
-                cout << " cumulative IPC: " << ((float) ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle);
-                cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
-                if(knob::partial_window_trace)
-                    cout << "partial window trace is enabled, actual instructions read from trace file, " << ooo_cpu[i].interval_counter->actual_instruction_count << endl;
-                record_roi_stats(i, &ooo_cpu[i].ITLB);
-                record_roi_stats(i, &ooo_cpu[i].DTLB);
-                record_roi_stats(i, &ooo_cpu[i].STLB);
-                record_roi_stats(i, &ooo_cpu[i].L1D);
-                record_roi_stats(i, &ooo_cpu[i].L1I);
-                record_roi_stats(i, &ooo_cpu[i].L2C);
-                record_roi_stats(i, &uncore.LLC);
+                if ((all_warmup_complete > NUM_CPUS) && 
+                    ((ooo_cpu[i].num_retired >= (ooo_cpu[i].begin_sim_instr + ooo_cpu[i].simulation_instructions)) || (trace_ended && core_drained)))
+                {
+                    simulation_complete[i] = 1;
+                    ooo_cpu[i].finish_sim_instr = ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr;
+                    ooo_cpu[i].finish_sim_cycle = current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle;
 
-                all_simulation_complete++;
+                    cout << "Finished CPU " << i << " instructions: " << ooo_cpu[i].finish_sim_instr << " cycles: " << ooo_cpu[i].finish_sim_cycle;
+                    cout << " cumulative IPC: " << ((float) ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle);
+                    cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
+                    if(knob::partial_window_trace)
+                        cout << "partial window trace is enabled, actual instructions read from trace file, " << ooo_cpu[i].interval_counter->actual_instruction_count << endl;
+                    record_roi_stats(i, &ooo_cpu[i].ITLB);
+                    record_roi_stats(i, &ooo_cpu[i].DTLB);
+                    record_roi_stats(i, &ooo_cpu[i].STLB);
+                    record_roi_stats(i, &ooo_cpu[i].L1D);
+                    record_roi_stats(i, &ooo_cpu[i].L1I);
+                    record_roi_stats(i, &ooo_cpu[i].L2C);
+                    record_roi_stats(i, &uncore.LLC);
+
+                    all_simulation_complete++;
+                }
             }
 
             if (all_simulation_complete == NUM_CPUS)
@@ -2007,87 +2089,6 @@ int main(int argc, char** argv)
             elapsed_minute -= elapsed_hour*60;
             elapsed_second -= (elapsed_hour*3600 + elapsed_minute*60);
     
-    cout << endl << "ChampSim completed all CPUs" << endl;
-    if (NUM_CPUS > 1) 
-    {
-//         cout << endl << "Total Simulation Statistics (not including warmup)" << endl;
-//         for (uint32_t i=0; i<NUM_CPUS; i++) 
-//         {
-//             cout << "Core_" << i << "_cumulative_IPC " << (float) (ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr) / (current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle) << endl
-//                 << "Core_" << i << "_total_instructions " << ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr << endl
-//                 << "Core_" << i << "_cycles " << current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle << endl
-//                 << endl;
-
-// #ifndef CRC2_COMPILE
-//             print_sim_stats(i, &ooo_cpu[i].L1D);
-//             print_sim_stats(i, &ooo_cpu[i].L1I);
-//             print_sim_stats(i, &ooo_cpu[i].L2C);
-// 	        ooo_cpu[i].l1i_prefetcher_final_stats();
-//             ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
-// 	        ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
-// #endif
-//             print_sim_stats(i, &uncore.LLC);
-//         }
-//         uncore.LLC.llc_prefetcher_final_stats();
-    }
-
-    cout << endl << "Region of Interest Statistics" << endl;
-    for (uint32_t i=0; i<NUM_CPUS; i++) 
-    {
-        cout << "Core_" << i << "_cumulative_IPC " << ((float) ooo_cpu[i].finish_sim_instr / ooo_cpu[i].finish_sim_cycle) << endl
-            << "Core_" << i << "_total_instructions " << ooo_cpu[i].finish_sim_instr << endl
-            << "Core_" << i << "_cycles " << ooo_cpu[i].finish_sim_cycle << endl
-            << endl;
-        
-        print_core_roi_stats(i);    
-
-#ifndef CRC2_COMPILE
-        print_roi_stats(i, &ooo_cpu[i].ITLB);
-        print_roi_stats(i, &ooo_cpu[i].DTLB);
-        print_roi_stats(i, &ooo_cpu[i].STLB);
-        print_roi_stats(i, &ooo_cpu[i].L1D);
-        print_roi_stats(i, &ooo_cpu[i].L1I);
-        print_roi_stats(i, &ooo_cpu[i].L2C);
-#endif
-        print_roi_stats(i, &uncore.LLC);
-        print_addr_translation_stats(i);
-    }
-
-    for (uint32_t i=0; i<NUM_CPUS; i++) 
-    {
-        ooo_cpu[i].l1i_prefetcher_final_stats();
-        ooo_cpu[i].L1D.l1d_prefetcher_final_stats();
-        ooo_cpu[i].L2C.l2c_prefetcher_final_stats();
-    }
-
-    uncore.LLC.llc_prefetcher_final_stats();
-
-#ifndef CRC2_COMPILE
-    uncore.LLC.llc_replacement_final_stats();
-    print_branch_stats();
-    print_dram_stats();
-#endif
-
-    for(uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu)
-    {
-        if(knob::enable_offchip_tracing)
-        {
-            ooo_cpu[cpu].tracer.fini_tracing();
-        }
-        if(knob::l2c_dump_access_trace)
-        {
-            ooo_cpu[cpu].L2C.tracer.fini_tracing();
-        }
-        // print and cleanup page table walker stats if present
-        if(ooo_cpu[cpu].page_table_walker) {
-            delete ooo_cpu[cpu].page_table_walker;
-            ooo_cpu[cpu].page_table_walker = nullptr;
-        }
-    }
-    if(knob::llc_dump_access_trace)
-    {
-        uncore.LLC.tracer.fini_tracing();
-    }
-
+    print_final_stats();
     return 0;
 }

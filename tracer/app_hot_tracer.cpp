@@ -249,12 +249,13 @@ BOOL ShouldWrite(THREADID tid)
   const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
 
   if (n > end || traceable_window > KnobMaxWindows.Value() || (window_id+1) >= phase_data.size()) {
-    // std::cerr << "Exiting: (n > end || traceable_window > KnobMaxWindows.Value() || (window_id+1) >= phase_data.size()" << '\n';
+    std::cerr << "Exiting: (n > end || traceable_window > KnobMaxWindows.Value() || (window_id+1) >= phase_data.size()" << '\n';
+    std::cerr << (n>end) << ' ' << (traceable_window > KnobMaxWindows.Value()) << ' ' << ((window_id+1) >= phase_data.size()) << '\n';
     PIN_ExitApplication(0);
     return FALSE;
   }
 
-  return phase_data[window_id].hot == 1 && n >= start && n <= end ? TRUE : FALSE;
+  return ((n >= start && n <= end) ? TRUE : FALSE); //phase_data[window_id].hot == 1 && 
 }
 
 
@@ -294,6 +295,7 @@ VOID WriteCurrentInstruction(THREADID tid)
   }
 
   fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);
+  // fprintf(stderr, "Pin, ip=%p, is_branch=%d, branch_taken=%d, wait=%d, window_id=%ld, record_size=%d\n", (void*)st->curr.ip, st->curr.is_branch, st->curr.branch_taken, st->curr.trace_window, st->curr.window_id, st->curr.record_size);
   // if ((st->instrCount & 0xFFFF) == 0) fflush(stdout);
 
   // uint64_t total = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();

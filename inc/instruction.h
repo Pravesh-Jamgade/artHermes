@@ -7,6 +7,7 @@
 #include "defs.h"
 #include "set.h"
 #include "const.h"
+#include "logging.h"
 #define MAGIC 0x544C425452414345ULL
 
 using namespace std;
@@ -315,6 +316,8 @@ class ooo_model_instr {
         asid[0] = cpu;
         asid[1] = cpu;
         this->record_size =instr.record_size;
+
+        // std::cout << "Sim, ip=" << hex2str(ip) << ", is_branch=" << (uint32_t)is_branch << ", branch_taken=" << (uint32_t)branch_taken << ", wait=" << (uint32_t)wait << ", window_id=" << window_id << ", record_size=" << record_size << std::endl;
     }
     
     ooo_model_instr(uint8_t cpu, input_instr instr) : ooo_model_instr()

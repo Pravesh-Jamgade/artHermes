@@ -115,8 +115,20 @@ ooo_model_instr tracereader::read_single_instr()
 
       h = context_instr();
       if (fread(&h, sizeof(context_instr), 1, trace_file) != 1) {
-        std::cerr << "Failed to read trace header\n";
-        std::exit(1);
+        if (feof(trace_file)) {
+          std::cerr << "Reached end of trace file cleanly (EOF)." << std::endl;
+          trace_ended = true;
+          return ooo_model_instr(cpu, h);
+        } else {
+          std::cerr << "Failed to read trace header\n";
+          std::exit(1);
+        }
+      }
+
+      if (h.magic == 0x1111425411114345ULL) { // END_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_MAGIC)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, h);
       }
 
       if(h.magic != MAGIC) {
@@ -129,17 +141,12 @@ ooo_model_instr tracereader::read_single_instr()
       }
 
       if (feof(trace_file)) {
-        // producer ended cleanly: restart
-        std::cerr << "producer ended cleanly: restart\n";
-        close(); // pclose
-        exit(1);
-        // trace_file = popen(trace_string.c_str(), "r");
-        // if (!trace_file) { perror("popen"); std::exit(1); }
-        // continue;              // retry read
+        std::cerr << "Reached end of trace file cleanly (EOF)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, h);
       }
       else if (ferror(trace_file)) {
         std::cerr << "not-eof --> read error/corruption\n";
-      // not EOF => real error/corruption
         perror("fread"); 
       } 
       
@@ -299,16 +306,19 @@ public:
     if (read_bytes != 1) {
       if (feof(trace_file)) {
         std::cerr << "Reached end of trace file/FIFO cleanly (EOF)." << std::endl;
-        std::exit(0);
+        trace_ended = true;
+        return ooo_model_instr(cpu, trace_read_instr);
       } else {
         std::cerr << "Error reading trace file/FIFO (errno=" << errno << ")" << std::endl;
-        std::exit(1);
+        trace_ended = true;
+        return ooo_model_instr(cpu, trace_read_instr);
       }
     }
 
     if (trace_read_instr.magic == 0x1111425411114345ULL) { // END_MAGIC
       std::cerr << "Reached end of trace file/FIFO cleanly (END_MAGIC)." << std::endl;
-      std::exit(0);
+      trace_ended = true;
+      return ooo_model_instr(cpu, trace_read_instr);
     }
 
     if (trace_read_instr.magic != 0x544C425452414345ULL) { // MAGIC
@@ -383,6 +393,11 @@ public:
     context_instr trace_read_instr = shared_buffer_ptr->buffer[shared_buffer_ptr->head % SharedBuffer::BUFFER_SIZE];
     shared_buffer_ptr->head = shared_buffer_ptr->head + 1;
 
+    if (trace_read_instr.magic == 0x1111425411114345ULL) { // END_MAGIC
+      std::cerr << "Reached end of shared memory buffer cleanly (END_MAGIC)." << std::endl;
+      trace_ended = true;
+    }
+
     return ooo_model_instr(cpu, trace_read_instr);
   }
 
@@ -406,18 +421,23 @@ public:
 tracereader* get_tracereader(std::string fname, uint8_t cpu, bool is_cloudsuite)
 {
   if (is_cloudsuite) {
+    cout << "Running in Trace-driven mode" << endl;
     return new cloudsuite_tracereader(cpu, fname);
   } else if (knob::enable_app_driven) {
     if(knob::enable_shmem_buffered)
     {
+      cout << "Running in Application-driven mode (Intel Pintool shared buffer)" << endl;
       return new shmem_buffered(cpu, fname);
     }
     else if(knob::enable_libc_buffered)
     {
+      cout << "Running in Application-driven mode (Libc-managed buffered pipe/file)" << endl;
       return new libc_buffered_tracereader(cpu, fname);
     }
   }
   else {
+    cout << "Running in Trace-driven mode" << endl;
     return new input_tracereader(cpu, fname);
   }
+  cout << endl;
 }

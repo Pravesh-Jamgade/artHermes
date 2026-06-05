@@ -266,6 +266,9 @@ void PTWclass::operate() {
 
     for (size_t i = 0; i < outstanding_walks.size(); i++) {
         OutstandingWalk &walk = outstanding_walks[i];
+        if (walk.event_cycle > current_core_cycle[cpu]) {
+            continue; // Not ready yet, respect PTW request queue latency
+        }
         bool dispatched = false;
 
         // Advance the walk through PwC hits; stop on first PwC miss (sends to memory)

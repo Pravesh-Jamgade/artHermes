@@ -14,6 +14,7 @@ protected:
 //   shared_buffer* buf;
   uint64_t instr_count = 0;
   bool app_driven = false;
+  bool trace_ended = false;
 public:
   tracereader(const tracereader& other) = delete;
   tracereader(uint8_t cpu, std::string _ts, bool app_driven=false);
@@ -29,6 +30,7 @@ public:
   bool read_header_or_die();
 
   virtual ooo_model_instr get() = 0;
+  bool eof() const { return trace_ended; }
 };
 
 tracereader* get_tracereader(std::string fname, uint8_t cpu, bool is_cloudsuite);

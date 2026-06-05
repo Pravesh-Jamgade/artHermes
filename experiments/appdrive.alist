@@ -1,2 +1,2 @@
-APP_PATH=$(APP1)/cc
-APP_INPUT=$(INPUT1)/web.sg
+APP_PATH=$(APP1)/rnd.out
+APP_INPUT=$(INPUT1)
