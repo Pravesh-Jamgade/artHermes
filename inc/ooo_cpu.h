@@ -182,6 +182,23 @@ public:
             uint64_t data_not_blocked;
             uint64_t data_blocked;
         } rob_load_waiting;
+        struct
+        {
+            uint64_t fetch_branch_mispredict;
+            uint64_t fetch_itlb_full;
+            uint64_t fetch_l1i_full;
+            uint64_t fetch_decode_full;
+            uint64_t dispatch_rob_full;
+            uint64_t sched_not_fetched;
+            uint64_t sched_reg_dependency;
+            uint64_t mem_sched_lq_full;
+            uint64_t mem_sched_sq_full;
+            uint64_t mem_sched_sta_head;
+            uint64_t execute_dtlb_full;
+            uint64_t execute_l1d_full;
+            uint64_t retire_rob_head_not_executed;
+            uint64_t retire_l1d_wq_full;
+        } stalls;
     } stats;
 
     LatencyHistogram load_to_use_hist; // histogram of load-to-use latency for loads that went offchip

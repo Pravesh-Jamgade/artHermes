@@ -516,6 +516,11 @@ void O3_CPU::fetch_instruction()
         fetch_resume_cycle = 0;
     }
 
+    if (fetch_stall == 1) {
+        if (warmup_complete[cpu])
+            stats.stalls.fetch_branch_mispredict++;
+    }
+
     if(IFETCH_BUFFER.occupancy == 0)
     {
         return;
@@ -559,6 +564,12 @@ void O3_CPU::fetch_instruction()
             trace_packet.event_cycle = current_core_cycle[cpu];
 
             int rq_index = ITLB.add_rq(&trace_packet);
+
+            if(rq_index == -2)
+            {
+                if (warmup_complete[cpu])
+                    stats.stalls.fetch_itlb_full++;
+            }
 
             if(rq_index != -2)
             {
@@ -612,8 +623,13 @@ void O3_CPU::fetch_instruction()
             }
             l1i_prefetcher_cache_operate(fetch_packet.ip, (hit_way != -1), prefetch_hit);
             */
-	  
-	        int rq_index = L1I.add_rq(&fetch_packet);
+	  	        int rq_index = L1I.add_rq(&fetch_packet);
+
+            if(rq_index == -2)
+            {
+                if (warmup_complete[cpu])
+                    stats.stalls.fetch_l1i_full++;
+            }
 
             if(rq_index != -2)
             {
@@ -687,6 +703,11 @@ void O3_CPU::fetch_instruction()
             index = 0;
 	    }
     }
+
+    if (decode_full) {
+        if (warmup_complete[cpu])
+            stats.stalls.fetch_decode_full++;
+    }
 }
 
 void O3_CPU::decode_and_dispatch()
@@ -725,6 +746,10 @@ void O3_CPU::decode_and_dispatch()
 	    }
         else
 	    {
+            if (ROB.occupancy >= ROB.SIZE) {
+                if (warmup_complete[cpu])
+                    stats.stalls.dispatch_rob_full++;
+            }
 	        break;
 	    }
     }
@@ -812,8 +837,13 @@ void O3_CPU::schedule_instruction()
     num_searched = 0;
     if (ROB.head < limit) {
         for (uint32_t i=ROB.head; i<limit; i++) { 
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 return;
+            }
 
             if (ROB.entry[i].scheduled == 0)
                 do_scheduling(i);
@@ -823,8 +853,13 @@ void O3_CPU::schedule_instruction()
     }
     else {
         for (uint32_t i=ROB.head; i<ROB.SIZE; i++) {
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 return;
+            }
 
             if (ROB.entry[i].scheduled == 0)
                 do_scheduling(i);
@@ -832,8 +867,13 @@ void O3_CPU::schedule_instruction()
             num_searched++;
         }
         for (uint32_t i=0; i<limit; i++) { 
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 return;
+            }
 
             if (ROB.entry[i].scheduled == 0)
                 do_scheduling(i);
@@ -848,6 +888,10 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
     ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency 
 
     reg_dependency(rob_index);
+    if (ROB.entry[rob_index].reg_ready == 0) {
+        if (warmup_complete[cpu])
+            stats.stalls.sched_reg_dependency++;
+    }
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
 
     if (ROB.entry[rob_index].is_memory)
@@ -1077,8 +1121,13 @@ void O3_CPU::schedule_memory_instruction()
             if (ROB.entry[i].is_memory == 0)
                 continue;
 
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 break;
+            }
 
             if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
@@ -1091,8 +1140,13 @@ void O3_CPU::schedule_memory_instruction()
             if (ROB.entry[i].is_memory == 0)
                 continue;
 
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 break;
+            }
 
             if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
@@ -1102,8 +1156,13 @@ void O3_CPU::schedule_memory_instruction()
             if (ROB.entry[i].is_memory == 0)
                 continue;
 
-            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
+            if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE)) {
+                if (ROB.entry[i].fetched != COMPLETED) {
+                    if (warmup_complete[cpu])
+                        stats.stalls.sched_not_fetched++;
+                }
                 break;
+            }
 
             if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
@@ -1156,6 +1215,8 @@ uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index)
                 num_added++;
             }
             else {
+                if (warmup_complete[cpu])
+                    stats.stalls.mem_sched_lq_full++;
                 DP(if(warmup_complete[cpu]) {
                 cout << "[LQ] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
                 cout << " cannot be added in the load queue occupancy: " << LQ.occupancy << " cycle: " << current_core_cycle[cpu] << endl; });
@@ -1180,11 +1241,18 @@ uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index)
                     add_store_queue(rob_index, i);
                     num_added++;
                 }
+                else
+                {
+                    if (warmup_complete[cpu])
+                        stats.stalls.mem_sched_sta_head++;
+                }
                 //add_store_queue(rob_index, i);
                 //num_added++;
             }
             else 
             {
+                if (warmup_complete[cpu])
+                    stats.stalls.mem_sched_sq_full++;
                 DP(if(warmup_complete[cpu]) {
                 cout << "[SQ] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
                 cout << " cannot be added in the store queue occupancy: " << SQ.occupancy << " cycle: " << current_core_cycle[cpu] << endl; });
@@ -1511,7 +1579,11 @@ void O3_CPU::operate_lsq()
                 int rq_index = DTLB.add_rq(&data_packet);
 
                 if (rq_index == -2)
+                {
+                    if (warmup_complete[cpu])
+                        stats.stalls.execute_dtlb_full++;
                     break; 
+                }
                 else 
                     SQ.entry[sq_index].translated = INFLIGHT;
 
@@ -1608,7 +1680,11 @@ void O3_CPU::operate_lsq()
                 int rq_index = DTLB.add_rq(&data_packet);
 
                 if (rq_index == -2)
+                {
+                    if (warmup_complete[cpu])
+                        stats.stalls.execute_dtlb_full++;
                     break; // break here
+                }
                 else  
                     LQ.entry[lq_index].translated = INFLIGHT;
 
@@ -1653,6 +1729,11 @@ void O3_CPU::operate_lsq()
                         RTL1_head = 0;
 
                     load_issued++;
+                }
+                else
+                {
+                    if (warmup_complete[cpu])
+                        stats.stalls.execute_l1d_full++;
                 }
             }
         }
@@ -2320,6 +2401,9 @@ void O3_CPU::retire_rob()
             }
             else 
             {
+                if (warmup_complete[cpu])
+                    stats.stalls.retire_l1d_wq_full++;
+
                 DP ( if (warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[ROB.head].instr_id << " L1D WQ is full" << endl; });
 

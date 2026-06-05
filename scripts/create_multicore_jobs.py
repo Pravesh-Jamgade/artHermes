@@ -84,6 +84,7 @@ def main():
 
     # Get absolute paths and check directory structure
     hermes_home = os.environ.get('HERMES_HOME', os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    os.environ['HERMES_HOME'] = hermes_home
     
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)

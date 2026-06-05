@@ -393,6 +393,22 @@ void print_core_roi_stats(uint32_t cpu)
     }
     cout << endl;
 
+    cout << "Core_" << cpu << "_fetch_branch_mispredict_stall " << ooo_cpu[cpu].stats.stalls.fetch_branch_mispredict << endl
+         << "Core_" << cpu << "_fetch_itlb_full_stall " << ooo_cpu[cpu].stats.stalls.fetch_itlb_full << endl
+         << "Core_" << cpu << "_fetch_l1i_full_stall " << ooo_cpu[cpu].stats.stalls.fetch_l1i_full << endl
+         << "Core_" << cpu << "_fetch_decode_full_stall " << ooo_cpu[cpu].stats.stalls.fetch_decode_full << endl
+         << "Core_" << cpu << "_dispatch_rob_full_stall " << ooo_cpu[cpu].stats.stalls.dispatch_rob_full << endl
+         << "Core_" << cpu << "_sched_not_fetched_stall " << ooo_cpu[cpu].stats.stalls.sched_not_fetched << endl
+         << "Core_" << cpu << "_sched_reg_dependency_stall " << ooo_cpu[cpu].stats.stalls.sched_reg_dependency << endl
+         << "Core_" << cpu << "_mem_sched_lq_full_stall " << ooo_cpu[cpu].stats.stalls.mem_sched_lq_full << endl
+         << "Core_" << cpu << "_mem_sched_sq_full_stall " << ooo_cpu[cpu].stats.stalls.mem_sched_sq_full << endl
+         << "Core_" << cpu << "_mem_sched_sta_head_stall " << ooo_cpu[cpu].stats.stalls.mem_sched_sta_head << endl
+         << "Core_" << cpu << "_execute_dtlb_full_stall " << ooo_cpu[cpu].stats.stalls.execute_dtlb_full << endl
+         << "Core_" << cpu << "_execute_l1d_full_stall " << ooo_cpu[cpu].stats.stalls.execute_l1d_full << endl
+         << "Core_" << cpu << "_retire_rob_head_not_executed_stall " << ooo_cpu[cpu].stats.stalls.retire_rob_head_not_executed << endl
+         << "Core_" << cpu << "_retire_l1d_wq_full_stall " << ooo_cpu[cpu].stats.stalls.retire_l1d_wq_full << endl
+         << endl;
+
     // loads per ip stats
     std::vector<std::pair<uint64_t, load_per_ip_info_t>> pairs;
     for(auto it = ooo_cpu[cpu].load_per_ip_stats.begin(); it != ooo_cpu[cpu].load_per_ip_stats.end(); ++it)
@@ -1921,6 +1937,14 @@ int main(int argc, char** argv)
                 if ((ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].executed == COMPLETED) && (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].event_cycle <= current_core_cycle[i]))
                 {
                     ooo_cpu[i].retire_rob();
+                }
+                else if (ooo_cpu[i].ROB.occupancy > 0)
+                {
+                    if (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].executed != COMPLETED)
+                    {
+                        if (warmup_complete[i])
+                            ooo_cpu[i].stats.stalls.retire_rob_head_not_executed++;
+                    }
                 }
 
                 // complete 
