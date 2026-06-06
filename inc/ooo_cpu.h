@@ -149,6 +149,10 @@ public:
             uint64_t went_offchip;
             uint64_t went_offchip_rob_head;
             uint64_t went_offchip_rob_non_head;
+            uint64_t older_blocker_exists;
+            uint64_t older_translation_blocker;
+            uint64_t older_data_blocker;
+            uint64_t older_branch_blocker;
         } bubble;
 
         struct
@@ -166,13 +170,6 @@ public:
             uint64_t dram_rq_full;
             uint64_t dram_mshr_full;
         } ddrp;
-        struct
-        {
-            uint64_t tlb_hit_data_hitwhere[hit_where_t::NumHitWheres] = {0};
-            uint64_t tlb_miss_data_hitwhere[hit_where_t::NumHitWheres] = {0};
-            uint64_t pwc_miss_and_data_hitwhere[4][hit_where_t::NumHitWheres][hit_where_t::NumHitWheres] = {};
-            map<hit_where_t, map<hit_where_t, uint64_t>> ptw_and_data_hitwhere;
-        } hitwhere_combinations;
         struct
         {
             uint64_t total_retired_loads;

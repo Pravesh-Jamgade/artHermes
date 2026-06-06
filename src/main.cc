@@ -334,53 +334,11 @@ void print_core_roi_stats(uint32_t cpu)
             << "Core_" << cpu << "_bubble_went_offchip " << ooo_cpu[cpu].stats.bubble.went_offchip << endl
             << "Core_" << cpu << "_bubble_went_offchip_rob_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_head << endl
             << "Core_" << cpu << "_bubble_went_offchip_rob_non_head " << ooo_cpu[cpu].stats.bubble.went_offchip_rob_non_head << endl
+            << "Core_" << cpu << "_bubble_older_blocker_exists " << ooo_cpu[cpu].stats.bubble.older_blocker_exists << endl
+            << "Core_" << cpu << "_bubble_older_translation_blocker " << ooo_cpu[cpu].stats.bubble.older_translation_blocker << endl
+            << "Core_" << cpu << "_bubble_older_data_blocker " << ooo_cpu[cpu].stats.bubble.older_data_blocker << endl
+            << "Core_" << cpu << "_bubble_older_branch_blocker " << ooo_cpu[cpu].stats.bubble.older_branch_blocker << endl
             << endl;
-
-        // hitwhere combinations stats
-        cout << "Core_" << cpu << "_tlb_hit_data_hitwhere_combinations,";
-        for (int i = 0; i < NumHitWheres; i++) {
-            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] > 0) {
-                cout << hit_where_names[i] << ",";
-            }
-        }
-        cout << endl;
-        cout << "Core_" << cpu << "_tlb_hit_data_hitwhere_combinations,";
-        for (int i = 0; i < NumHitWheres; i++) {
-            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] > 0) {
-                cout << ooo_cpu[cpu].stats.hitwhere_combinations.tlb_hit_data_hitwhere[i] << ",";
-            }
-        }
-        cout << endl;
-        
-        cout << "Core_" << cpu << "_tlb_miss_data_hitwhere_combinations,";
-        for (int i = 0; i < NumHitWheres; i++) {
-            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] > 0) {
-                cout << hit_where_names[i] << "," ;
-            }
-        }
-        cout << endl;
-        cout << "Core_" << cpu << "_tlb_miss_data_hitwhere_combinations,";
-        for(int i = 0; i < NumHitWheres; i++) {
-            if (ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] > 0) {
-                cout << ooo_cpu[cpu].stats.hitwhere_combinations.tlb_miss_data_hitwhere[i] << ",";
-            }
-        }   
-        cout << endl;
-
-        // Per-level PWC miss × data hitwhere combinations
-        static const char *lvl_names[4] = {"L0_PTE", "L1_PMD", "L2_PUD", "L3_PML4"};
-        for (int lvl = 0; lvl < 4; lvl++) {
-            for (uint32_t pwc_i = 0; pwc_i < NumHitWheres; pwc_i++) {
-                for (uint32_t data_i = 0; data_i < NumHitWheres; data_i++) {
-                    uint64_t cnt = ooo_cpu[cpu].stats.hitwhere_combinations.pwc_miss_and_data_hitwhere[lvl][pwc_i][data_i];
-                    if (cnt > 0) {
-                        cout << "Core_" << cpu << "_pwc_miss_and_data_hitwhere_combinations,"
-                             << lvl_names[lvl] << "_pwchit_" << hit_where_names[pwc_i]
-                             << "-data_" << hit_where_names[data_i] << ", " << cnt << endl;
-                    }
-                }
-            }
-        }
     }
     
     for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)

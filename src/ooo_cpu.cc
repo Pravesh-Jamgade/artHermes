@@ -2197,35 +2197,6 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
         // pravesh
             ROB.entry[rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
             ROB.entry[rob_index].data_hit_where = queue->entry[index].hit_where;
-
-            hit_where_t data_hit_loc = queue->entry[index].hit_where;
-
-            auto clamp_hit_src = [](hit_where_t hit_loc) -> uint32_t {
-                uint32_t h = static_cast<uint32_t>(hit_loc);
-                if      (h >= static_cast<uint32_t>(hit_where_t::L1D) && h <= static_cast<uint32_t>(hit_where_t::L1D_MSHR)) { return static_cast<uint32_t>(hit_where_t::L1D); }
-                else if (h >= static_cast<uint32_t>(hit_where_t::L1I) && h <= static_cast<uint32_t>(hit_where_t::L1I_MSHR)) { return static_cast<uint32_t>(hit_where_t::L1I); }
-                else if (h >= static_cast<uint32_t>(hit_where_t::L2C) && h <= static_cast<uint32_t>(hit_where_t::L2C_MSHR)) { return static_cast<uint32_t>(hit_where_t::L2C); }
-                else if (h >= static_cast<uint32_t>(hit_where_t::LLC) && h <= static_cast<uint32_t>(hit_where_t::LLC_MSHR)) { return static_cast<uint32_t>(hit_where_t::LLC); }
-                else if (h == static_cast<uint32_t>(hit_where_t::DRAM))                                   { return static_cast<uint32_t>(hit_where_t::DRAM); }
-                else                                                                                      { return static_cast<uint32_t>(hit_loc); }
-            };
-
-            uint32_t dhw = clamp_hit_src(data_hit_loc);
-
-            if (dhw < NumHitWheres) {
-                if (ROB.entry[rob_index].translation_hit_tlb) {
-                    stats.hitwhere_combinations.tlb_hit_data_hitwhere[dhw]++;
-                } else {
-                    stats.hitwhere_combinations.tlb_miss_data_hitwhere[dhw]++;
-                }
-                // Record per-level PWC miss × data hitwhere cross-product
-                uint32_t pwc_bits = ROB.entry[rob_index].pwc_miss_mem_hitwhere;
-                for (int lvl = 0; lvl < 4 && pwc_bits != 0; lvl++) {
-                    uint32_t pwc_src = (pwc_bits >> (lvl * 5)) & 0x1F;
-                    if (pwc_src > 0 && pwc_src < NumHitWheres)
-                        stats.hitwhere_combinations.pwc_miss_and_data_hitwhere[lvl][pwc_src][dhw]++;
-                }
-            }
     }
 
     // remove this entry
@@ -2549,29 +2520,32 @@ string O3_CPU::rob_to_string()
 void O3_CPU::measure_bubble()
 {
    ooo_model_instr *entry = &ROB.entry[ROB.head];
-   if(entry->rob_head_cycle == 0) return; // if rob_head_cycle is 0, it means this instruction did not block the ROB, so we do not count any bubble for it
 
-   int64_t t_bubble = 0;
+   int64_t t_latency = 0;
+   if (entry->translation_finished_event_cycle != UINT64_MAX && entry->dispatch_cycle != UINT64_MAX) {
+       t_latency = (int64_t)entry->translation_finished_event_cycle - (int64_t)entry->dispatch_cycle;
+   }
+   if(t_latency < 0) {
+       t_latency = 0;
+   }
+
    if (entry->translation_finished_event_cycle != UINT64_MAX) {
-       t_bubble = (int64_t)entry->translation_finished_event_cycle - (int64_t)entry->rob_head_cycle;
-   }
-   if(t_bubble < 0) {
-    t_bubble = 0;
+       load_to_translation_hist.update(t_latency);
    }
 
-   load_to_translation_hist.update(t_bubble);
-
-   int64_t d_bubble = 0;
+   int64_t d_latency = 0;
    if (entry->data_fetch_finished_event_cycle != UINT64_MAX && entry->translation_finished_event_cycle != UINT64_MAX) {
-       d_bubble = (int64_t)entry->data_fetch_finished_event_cycle - (int64_t)entry->translation_finished_event_cycle;
+       d_latency = (int64_t)entry->data_fetch_finished_event_cycle - (int64_t)entry->translation_finished_event_cycle;
    }
-   if(d_bubble < 0){
-    d_bubble = 0;
+   if(d_latency < 0){
+       d_latency = 0;
    }
 
-   load_to_use_hist.update(d_bubble);
+   if (entry->data_fetch_finished_event_cycle != UINT64_MAX && entry->translation_finished_event_cycle != UINT64_MAX) {
+       load_to_use_hist.update(d_latency);
+   }
 
-//    cout << "[Bubble] head, " << entry->rob_head_cycle << ", trans, " << t_bubble << ", data, " << d_bubble << '\n';
+//    cout << "[Bubble] head, " << entry->rob_head_cycle << ", trans, " << t_latency << ", data, " << d_latency << '\n';
 }
 
 void O3_CPU::measure_pipeline_bubble_stats(uint32_t lq_index, uint32_t rob_index)
@@ -2601,6 +2575,43 @@ void O3_CPU::measure_pipeline_bubble_stats(uint32_t lq_index, uint32_t rob_index
         {
             stats.bubble.went_offchip_rob_non_head++;
         }
+
+        bool older_blocker_exists = false;
+        uint32_t older_translation_blocker = 0;
+        uint32_t older_data_blocker = 0;
+        uint32_t older_branch_blocker = 0;
+
+        uint32_t i = ROB.head;
+        while (i != rob_index) {
+            ooo_model_instr &instr = ROB.entry[i];
+            if (instr.executed != COMPLETED) {
+                older_blocker_exists = true;
+
+                if (instr.is_load && instr.translated != COMPLETED) {
+                    older_translation_blocker++;
+                }
+
+                if (instr.is_load && instr.translated == COMPLETED && instr.fetched != COMPLETED) {
+                    older_data_blocker++;
+                }
+
+                if (instr.is_branch && instr.executed != COMPLETED) {
+                    older_branch_blocker++;
+                }
+            }
+
+            i++;
+            if (i == ROB.SIZE) {
+                i = 0;
+            }
+        }
+
+        if (older_blocker_exists) {
+            stats.bubble.older_blocker_exists++;
+        }
+        stats.bubble.older_translation_blocker += older_translation_blocker;
+        stats.bubble.older_data_blocker += older_data_blocker;
+        stats.bubble.older_branch_blocker += older_branch_blocker;
         
         uint64_t bubbles = (ROB.entry[rob_index].rob_head_cycle != 0) ? (current_core_cycle[cpu] - ROB.entry[rob_index].rob_head_cycle) : 0;
         uint32_t rob_part_id = get_rob_parition_id(LQ.entry[lq_index].rob_position);

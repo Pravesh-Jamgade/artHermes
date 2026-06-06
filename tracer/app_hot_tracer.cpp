@@ -8,9 +8,10 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <random>
+#include <ctime>
 #include <iostream>
 #include <csignal>
+#include <cstdlib>
 
 /*
 tracer_new.cpp
@@ -114,7 +115,7 @@ static FILE* g_out = nullptr;
 
 std::vector<PhaseRow> read_phase_csv(const std::string& filename)
 {
-    std::ifstream file(filename);
+    std::ifstream file(filename.c_str());
     if (!file) {
       std::cerr << "ERROR: Cannot open file: " << filename << std::endl;
       std::exit(1);   // or return {}
@@ -133,22 +134,22 @@ std::vector<PhaseRow> read_phase_csv(const std::string& filename)
         std::string tok;
         PhaseRow r;
 
-        std::getline(ss, tok, ','); r.tid = std::stoi(tok);
-        std::getline(ss, tok, ','); r.win_id = std::stoi(tok);
-        std::getline(ss, tok, ','); r.insts = std::stoull(tok);
+        std::getline(ss, tok, ','); r.tid = ::atoi(tok.c_str());
+        std::getline(ss, tok, ','); r.win_id = ::atoi(tok.c_str());
+        std::getline(ss, tok, ','); r.insts = ::strtoull(tok.c_str(), nullptr, 10);
 
-        std::getline(ss, tok, ','); r.uniq4k = std::stoull(tok);
-        std::getline(ss, tok, ','); r.ppki4k = std::stod(tok);
+        std::getline(ss, tok, ','); r.uniq4k = ::strtoull(tok.c_str(), nullptr, 10);
+        std::getline(ss, tok, ','); r.ppki4k = ::strtod(tok.c_str(), nullptr);
 
-        std::getline(ss, tok, ','); r.new4k = std::stoull(tok);
-        std::getline(ss, tok, ','); r.newpageski = std::stod(tok);
-        std::getline(ss, tok, ','); r.new_frac = std::stod(tok);
+        std::getline(ss, tok, ','); r.new4k = ::strtoull(tok.c_str(), nullptr, 10);
+        std::getline(ss, tok, ','); r.newpageski = ::strtod(tok.c_str(), nullptr);
+        std::getline(ss, tok, ','); r.new_frac = ::strtod(tok.c_str(), nullptr);
 
-        std::getline(ss, tok, ','); r.jac = std::stod(tok);
-        std::getline(ss, tok, ','); r.churn = std::stod(tok);
+        std::getline(ss, tok, ','); r.jac = ::strtod(tok.c_str(), nullptr);
+        std::getline(ss, tok, ','); r.churn = ::strtod(tok.c_str(), nullptr);
 
-        std::getline(ss, tok, ','); r.cluster_id = std::stoi(tok);
-        std::getline(ss, tok, ','); r.hot = std::stoi(tok);
+        std::getline(ss, tok, ','); r.cluster_id = ::atoi(tok.c_str());
+        std::getline(ss, tok, ','); r.hot = ::atoi(tok.c_str());
 
         // std::cerr << "Before win_id: " << r.win_id << ", hot, " << r.hot << '\n';
 
@@ -167,28 +168,19 @@ std::vector<PhaseRow> read_phase_csv(const std::string& filename)
     uint64_t hot_region_count = rows.size() - phase_cold.size();
     if(hot_region_count < KnobMaxWindows.Value())
     {
-      // 1. Obtain a seed for the random number engine
-      std::random_device rd;
+      ::srand(::time(nullptr));
 
-      // 2. Seed the Mersenne Twister engine
-      // mt19937 provides a high-quality pseudo-random number generator
-      std::mt19937 gen(rd()); 
+      int range = phase_cold.size();
+      if (range > 0) {
+        int kTimes = KnobMaxWindows.Value() - hot_region_count;
+        while(kTimes--)
+        {
+          int random_num = ::rand() % range;
+          int win_id = phase_cold[random_num];
 
-      // 3. Define the desired range (inclusive) using a uniform distribution
-      int min_val = 0;
-      int max_val = phase_cold.size()-1;
-      std::uniform_int_distribution<int> distrib(min_val, max_val); 
-
-      int kTimes = KnobMaxWindows.Value() - hot_region_count;
-      while(kTimes--)
-      {
-        // 4. Generate the random number
-        int random_num = distrib(gen);
-        int win_id = phase_cold[random_num];
-
-        rows[win_id].hot = 1;
+          rows[win_id].hot = 1;
+        }
       }
-
     }
 
     // for(auto entry: rows)
