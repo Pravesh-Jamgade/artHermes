@@ -52,7 +52,7 @@ def parse_files(exp_path, trace_path):
         final_exps[key] = os.path.expandvars(step1)
 
     for t in traces:
-        for key in ['APP_PATH', 'APP_INPUT', 'TRACE']:
+        for key in ['APP_PATH', 'APP_INPUT', 'APP_PHASE', 'TRACE']:
             if key in t:
                 step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), t[key])
                 t[key] = os.path.normpath(os.path.expandvars(step1))
@@ -94,7 +94,7 @@ def main():
     parser.add_argument("-g", "--greedy-tracing", type=int, default=0, help="Greedy tracing")
     # OR THIS
     parser.add_argument("-w", "--trace-windows", type=int, default=0, help="trace n hot windows")
-    parser.add_argument("--hot-phases", type=str, default=0, help="hot phase file")
+    # parser.add_argument("--phase-dir", type=str, default=0, help="hot phase file location")
     
     args = parser.parse_args()
 
@@ -160,7 +160,7 @@ def main():
                     pincmd = (
                         f"{pin_path} "
                         f"-t {pintool_path} -s 0 -t {args.sim} "
-                        f"-w {args.trace_windows} -phase_file {args.hot_phases} -o {trace_arg} "
+                        f"-w {args.trace_windows} -phase_file {t['APP_PHASE']} -o {trace_arg} "
                         f"-- {t['APP_PATH']} {t['APP_INPUT']}"
                     )
                 task_queue.append({'name': run_name, 'simcmd': simcmd, 'pincmd': pincmd, 'log': log_file})
