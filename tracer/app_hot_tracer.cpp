@@ -259,6 +259,7 @@ BOOL ShouldWrite(THREADID tid)
   // const uint64_t start = KnobSkipInstructions.Value() + 1;
   // const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
 
+<<<<<<< HEAD
   // // uint64_t temp_new_window_id = (st->instrCount-1) / (window_size);
 
   // // if(temp_new_window_id < phase_data.size())
@@ -291,6 +292,38 @@ BOOL ShouldWrite(THREADID tid)
   // st->should_write = allow_write;
   // fprintf(stderr, "ShouldWrite %p, %lu, %lu, %lu, %d\n", (void*)st->curr.ip, start, n, end, allow_write);
   return 1; //phase_data[window_id].hot == 1 && 
+=======
+  uint64_t temp_new_window_id = (st->instrCount-1) / (window_size);
+
+  if(temp_new_window_id < phase_data.size())
+  {
+    bool change_phase = false;
+    if(window_id != temp_new_window_id)
+    {
+      change_phase = true;
+      window_id = temp_new_window_id;
+      if(phase_data[window_id].hot == 1)
+      {
+        traceable_window++;
+      }
+    }
+    
+    st->curr.trace_window = phase_data[window_id].hot;
+    st->curr.window_id = phase_data[window_id].win_id; 
+    
+    if(change_phase)
+      fprintf(stderr, "Hot=%d, Win=%lu, Traced=%lu\n", st->curr.trace_window, st->curr.window_id, traceable_window);
+  }
+ 
+  if (n > end || traceable_window > knob_number_of_windows || temp_new_window_id >= phase_data.size()) {
+    std::cerr << "Exiting: (n > end || traceable_window > knob_number_of_windows || temp_new_window_id >= phase_data.size())" << '\n';
+    std::cerr << (n>end) << ' ' << (traceable_window > knob_number_of_windows) << ' ' << (temp_new_window_id >= phase_data.size()) << '\n';
+    PIN_ExitApplication(0);
+    return FALSE;
+  }
+
+  return ((n >= start && n <= end) ? TRUE : FALSE) && phase_data[window_id].hot == 1 ; //phase_data[window_id].hot == 1 && 
+>>>>>>> ccba2d3 (issues with pintool)
 }
 
 
@@ -300,6 +333,7 @@ VOID WriteCurrentInstruction(THREADID tid)
   auto* st = GetState(tid);
   if (!st) return;
 
+<<<<<<< HEAD
   // st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
   // st->curr.magic = MAGIC;
   // st->curr.window_id = window_id;
@@ -314,6 +348,21 @@ VOID WriteCurrentInstruction(THREADID tid)
 
   // fprintf(stderr, "%p, %lu, %d, %d\n", (void*)st->curr.ip, st->instrCount, st->curr.trace_window, st->should_write);
 
+=======
+  st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
+  st->curr.magic = MAGIC;
+  st->curr.trace_window = 0;
+  st->curr.window_id = window_id;
+
+  /*write to buffer fifo*/
+  if (!g_out) {
+      fprintf(stderr, "g_out is NULL\n");
+      PIN_ExitApplication(1);
+  }
+
+  fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);
+
+>>>>>>> ccba2d3 (issues with pintool)
   // if ((st->instrCount & 0xFFFF) == 0) fflush(stdout);
 
   // uint64_t total = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
@@ -491,6 +540,10 @@ VOID Fini(INT32 code, VOID* v)
     curr.magic = END_MAGIC;
     curr.trace_window = 0;
     curr.window_id = window_id;
+<<<<<<< HEAD
+=======
+
+>>>>>>> ccba2d3 (issues with pintool)
     fwrite(&curr, sizeof(trace_instr_format_t), 1, g_out);
     fflush(g_out);
     fclose(g_out);
