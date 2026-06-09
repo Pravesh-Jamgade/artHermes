@@ -255,9 +255,9 @@ BOOL ShouldWrite(THREADID tid)
   if (!st) return FALSE;
 
   ++st->instrCount;
-  // const uint64_t n = st->instrCount;
-  // const uint64_t start = KnobSkipInstructions.Value() + 1;
-  // const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
+  const uint64_t n = st->instrCount;
+  const uint64_t start = KnobSkipInstructions.Value() + 1;
+  const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
 
   uint64_t temp_new_window_id = (st->instrCount-1) / (window_size);
 
