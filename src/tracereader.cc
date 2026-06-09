@@ -254,6 +254,9 @@ public:
     }
 
     ooo_model_instr trace_read_instr = read_single_instr<context_instr>();
+
+    instr_count++;
+    // std::cout << std::hex << trace_read_instr.ip << std::dec << ", " << instr_count << '\n';
       
     last_instr.branch_target = trace_read_instr.ip;
     ooo_model_instr retval = last_instr;
@@ -338,6 +341,9 @@ public:
 
     ooo_model_instr trace_read_instr = read_helper();
 
+    instr_count++;
+    // std::cout << std::hex << trace_read_instr.ip << std::dec << ", " << instr_count << '\n';
+      
     last_instr.branch_target = trace_read_instr.ip;
     ooo_model_instr retval = last_instr;
 

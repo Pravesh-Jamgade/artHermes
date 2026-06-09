@@ -17,7 +17,7 @@
 # This defines tests which run tools of the same name.  This is simply for convenience to avoid
 # defining the test name twice (once in TOOL_ROOTS and again in TEST_ROOTS).
 # Tests defined here should not be defined in TOOL_ROOTS and TEST_ROOTS.
-TEST_TOOL_ROOTS := app_hot_tracer
+TEST_TOOL_ROOTS := app_hot_tracer app_eval_tracer
 
 # This defines the tests to be run that were not already defined in TEST_TOOL_ROOTS.
 TEST_ROOTS :=
@@ -73,4 +73,4 @@ LIB_ROOTS :=
 # This section contains the build rules for all binaries that have special build rules.
 # See makefile.default.rules for the default build rules.
 # Inject C++11/C++17 flag to ensure std::stoi and modern headers are supported
-TOOL_CXXFLAGS += -std=c++11
+TOOL_CXXFLAGS += -std=c++14

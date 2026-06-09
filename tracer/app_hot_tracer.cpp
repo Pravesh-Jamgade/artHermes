@@ -22,6 +22,7 @@ tracer_new.cpp
 static constexpr int NUM_INSTR_DESTINATIONS = 2;
 static constexpr int NUM_INSTR_SOURCES      = 4;
 
+uint32_t knob_number_of_windows = 0;
 uint64_t window_size = 0;
 uint64_t window_id = 0;
 uint64_t traceable_window = 0;
@@ -65,6 +66,7 @@ static_assert(offsetof(context_instr, trace_window) == 84);
 using trace_instr_format_t = context_instr;
 
 struct thread_state_t {
+  bool should_write = 0;
   uint64_t instrCount = 0;
   trace_instr_format_t curr{};
   // std::ofstream outfile;
@@ -118,7 +120,7 @@ std::vector<PhaseRow> read_phase_csv(const std::string& filename)
     std::ifstream file(filename.c_str());
     if (!file) {
       std::cerr << "ERROR: Cannot open file: " << filename << std::endl;
-      std::exit(1);   // or return {}
+      PIN_ExitProcess(1);
   }
     std::vector<PhaseRow> rows;
     std::vector<int> phase_cold;
@@ -151,34 +153,51 @@ std::vector<PhaseRow> read_phase_csv(const std::string& filename)
         std::getline(ss, tok, ','); r.cluster_id = ::atoi(tok.c_str());
         std::getline(ss, tok, ','); r.hot = ::atoi(tok.c_str());
 
-        // std::cerr << "Before win_id: " << r.win_id << ", hot, " << r.hot << '\n';
+        // std::cerr << "Before win_id: " << r.win_id << ", hot, " << r.hot << ", instr, " << r.insts << '\n';
 
         window_size = r.insts;
         rows.push_back(r);
 
         if(r.hot == 0)
         {
-          phase_cold.push_back(r.win_id);
+          phase_cold.push_back(rows.size() - 1);
         }
+    }
+
+    if (rows.empty()) {
+      std::cerr << "ERROR: No phase rows found in " << filename << std::endl;
+      PIN_ExitProcess(1);
+    }
+
+    if (window_size == 0) {
+      std::cerr << "ERROR: window_size is 0" << std::endl;
+      PIN_ExitProcess(1);
+    }
+
+    knob_number_of_windows = KnobMaxWindows.Value();
+
+    // if w > rows.size() then wrap around
+    if(knob_number_of_windows > rows.size()){
+      knob_number_of_windows = rows.size();
     }
 
     // for(auto entry: phase_cold)
     //   std::cout << "Cold phase win_id, " << entry << '\n';
 
     uint64_t hot_region_count = rows.size() - phase_cold.size();
-    if(hot_region_count < KnobMaxWindows.Value())
+    if(hot_region_count < knob_number_of_windows)
     {
       ::srand(::time(nullptr));
 
       int range = phase_cold.size();
       if (range > 0) {
-        int kTimes = KnobMaxWindows.Value() - hot_region_count;
+        int kTimes = knob_number_of_windows - hot_region_count;
         while(kTimes--)
         {
           int random_num = ::rand() % range;
-          int win_id = phase_cold[random_num];
+          int row_idx = phase_cold[random_num];
 
-          rows[win_id].hot = 1;
+          rows[row_idx].hot = 1;
         }
       }
     }
@@ -236,18 +255,42 @@ BOOL ShouldWrite(THREADID tid)
   if (!st) return FALSE;
 
   ++st->instrCount;
-  const uint64_t n = st->instrCount;
-  const uint64_t start = KnobSkipInstructions.Value() + 1;
-  const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
+  // const uint64_t n = st->instrCount;
+  // const uint64_t start = KnobSkipInstructions.Value() + 1;
+  // const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
 
-  if (n > end || traceable_window > KnobMaxWindows.Value() || (window_id+1) >= phase_data.size()) {
-    std::cerr << "Exiting: (n > end || traceable_window > KnobMaxWindows.Value() || (window_id+1) >= phase_data.size()" << '\n';
-    std::cerr << (n>end) << ' ' << (traceable_window > KnobMaxWindows.Value()) << ' ' << ((window_id+1) >= phase_data.size()) << '\n';
-    PIN_ExitApplication(0);
-    return FALSE;
-  }
+  // // uint64_t temp_new_window_id = (st->instrCount-1) / (window_size);
 
-  return ((n >= start && n <= end) ? TRUE : FALSE); //phase_data[window_id].hot == 1 && 
+  // // if(temp_new_window_id < phase_data.size())
+  // // {
+  // //   bool change_phase = false;
+  // //   if(window_id != temp_new_window_id)
+  // //   {
+  // //     change_phase = true;
+  // //     window_id = temp_new_window_id;
+  // //     if(phase_data[window_id].hot == 1)
+  // //     {
+  // //       traceable_window++;
+  // //     }
+  // //   }
+    
+  // //   st->curr.trace_window = phase_data[window_id].hot;
+  // //   st->curr.window_id = phase_data[window_id].win_id; 
+    
+  // //   if(change_phase)
+  // //     fprintf(stderr, "Hot=%d, Win=%lu, Traced=%lu\n", st->curr.trace_window, st->curr.window_id, traceable_window);
+  // // }
+ 
+  // if (n > end || traceable_window > knob_number_of_windows) {
+  //   std::cerr << "Exiting: (n > end || traceable_window > knob_number_of_windows || temp_new_window_id >= phase_data.size())" << '\n';
+  //   PIN_ExitApplication(0);
+  //   return FALSE;
+  // }
+
+  // bool allow_write = (n >= start && n <= end);
+  // st->should_write = allow_write;
+  // fprintf(stderr, "ShouldWrite %p, %lu, %lu, %lu, %d\n", (void*)st->curr.ip, start, n, end, allow_write);
+  return 1; //phase_data[window_id].hot == 1 && 
 }
 
 
@@ -257,37 +300,20 @@ VOID WriteCurrentInstruction(THREADID tid)
   auto* st = GetState(tid);
   if (!st) return;
 
-  instruction_count++;
+  // st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
+  // st->curr.magic = MAGIC;
+  // st->curr.window_id = window_id;
 
-  st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
-  st->curr.magic = MAGIC;
-  st->curr.trace_window = 0;
-  st->curr.window_id = window_id;
-
-  uint64_t temp_new_window_id = instruction_count / (window_size+1);
-
-  if(temp_new_window_id < phase_data.size())
-  {
-    bool change_phase = false;
-    if(window_id != temp_new_window_id)
-    {
-      change_phase = true;
-      window_id = temp_new_window_id;
-      if(phase_data[window_id].hot == 1)
-      {
-        traceable_window++;
-      }
-    }
-    
-    st->curr.trace_window = phase_data[window_id].hot;
-    st->curr.window_id = phase_data[window_id].win_id; 
-    
-    if(change_phase)
-      fprintf(stderr, "Hot=%d, Win=%ld, Traced=%ld\n", st->curr.trace_window, st->curr.window_id, traceable_window);
-  }
+  // /*write to buffer fifo*/
+  // if (!g_out) {
+  //     fprintf(stderr, "g_out is NULL\n");
+  //     PIN_ExitApplication(1);
+  // }
 
   fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);
-  // fprintf(stderr, "Pin, ip=%p, is_branch=%d, branch_taken=%d, wait=%d, window_id=%ld, record_size=%d\n", (void*)st->curr.ip, st->curr.is_branch, st->curr.branch_taken, st->curr.trace_window, st->curr.window_id, st->curr.record_size);
+
+  // fprintf(stderr, "%p, %lu, %d, %d\n", (void*)st->curr.ip, st->instrCount, st->curr.trace_window, st->should_write);
+
   // if ((st->instrCount & 0xFFFF) == 0) fflush(stdout);
 
   // uint64_t total = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
@@ -354,38 +380,38 @@ VOID Instruction(INS ins, VOID*)
                    IARG_THREAD_ID, IARG_BRANCH_TAKEN, IARG_END);
   }
 
-  // reg reads
-  const UINT32 rcount = INS_MaxNumRRegs(ins);
-  for (UINT32 i = 0; i < rcount; i++) {
-    REG r = INS_RegR(ins, i);
-    if (r != REG_INVALID()) {
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddRegRead,
-                     IARG_THREAD_ID, IARG_UINT32, (UINT32)r, IARG_END);
-    }
-  }
+  // // reg reads
+  // const UINT32 rcount = INS_MaxNumRRegs(ins);
+  // for (UINT32 i = 0; i < rcount; i++) {
+  //   REG r = INS_RegR(ins, i);
+  //   if (r != REG_INVALID()) {
+  //     INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddRegRead,
+  //                    IARG_THREAD_ID, IARG_UINT32, (UINT32)r, IARG_END);
+  //   }
+  // }
 
-  // reg writes
-  const UINT32 wcount = INS_MaxNumWRegs(ins);
-  for (UINT32 i = 0; i < wcount; i++) {
-    REG r = INS_RegW(ins, i);
-    if (r != REG_INVALID()) {
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddRegWrite,
-                     IARG_THREAD_ID, IARG_UINT32, (UINT32)r, IARG_END);
-    }
-  }
+  // // reg writes
+  // const UINT32 wcount = INS_MaxNumWRegs(ins);
+  // for (UINT32 i = 0; i < wcount; i++) {
+  //   REG r = INS_RegW(ins, i);
+  //   if (r != REG_INVALID()) {
+  //     INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddRegWrite,
+  //                    IARG_THREAD_ID, IARG_UINT32, (UINT32)r, IARG_END);
+  //   }
+  // }
 
-  // mem operands
-  const UINT32 memOps = INS_MemoryOperandCount(ins);
-  for (UINT32 memOp = 0; memOp < memOps; memOp++) {
-    if (INS_MemoryOperandIsRead(ins, memOp)) {
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddMemRead,
-                     IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_END);
-    }
-    if (INS_MemoryOperandIsWritten(ins, memOp)) {
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddMemWrite,
-                     IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_END);
-    }
-  }
+  // // mem operands
+  // const UINT32 memOps = INS_MemoryOperandCount(ins);
+  // for (UINT32 memOp = 0; memOp < memOps; memOp++) {
+  //   if (INS_MemoryOperandIsRead(ins, memOp)) {
+  //     INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddMemRead,
+  //                    IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_END);
+  //   }
+  //   if (INS_MemoryOperandIsWritten(ins, memOp)) {
+  //     INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)AddMemWrite,
+  //                    IARG_THREAD_ID, IARG_MEMORYOP_EA, memOp, IARG_END);
+  //   }
+  // }
 
   INS_InsertIfCall(ins, IPOINT_BEFORE, (AFUNPTR)ShouldWrite,
                    IARG_THREAD_ID, IARG_END);
@@ -407,25 +433,23 @@ VOID ThreadStart(THREADID tid, CONTEXT*, INT32, VOID*)
 VOID ThreadFini(THREADID tid, const CONTEXT*, INT32, VOID*)
 {
   auto* st = GetState(tid);
+  if (!st) return;
 
-  if(tid == tracked_tid)
-  {
-    st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
+  if (tid == tracked_tid && g_out) {
+    st->curr = {};
+    st->curr.record_size = sizeof(trace_instr_format_t);
     st->curr.magic = END_MAGIC;
     st->curr.trace_window = 0;
     st->curr.window_id = window_id;
 
+    fprintf(stderr, "instrCount=%lu\n", st->instrCount);
     fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);
-
-    if (g_out) {
-      fflush(g_out);
-      fclose(g_out);
-      g_out = nullptr;
-    }
+    fflush(g_out);
+    fclose(g_out);
+    g_out = nullptr;
   }
 
   delete st;
-  
   PIN_SetThreadData(tls_key, nullptr, tid);
 }
 
@@ -444,6 +468,11 @@ static void open_trace_out()
   perror(("fopen " + path).c_str());
   PIN_ExitProcess(1);
   }
+  fprintf(stderr,
+        "g_out=%p fd=%d stdout_fd=%d\n",
+        g_out,
+        fileno(g_out),
+        fileno(stdout));
 
   // // buffered is GOOD
   // setvbuf(g_out, nullptr, _IOFBF, 1 << 20); // 1MB buffer
@@ -452,7 +481,21 @@ static void open_trace_out()
 extern "C" void signal_handler(int signum){
 std::cerr << "Signal handler cntrl+c\n";
 signal_received = signum;
-exit(0);
+}
+
+VOID Fini(INT32 code, VOID* v)
+{
+  if (g_out) {
+    trace_instr_format_t curr{};
+    curr.record_size = sizeof(trace_instr_format_t);
+    curr.magic = END_MAGIC;
+    curr.trace_window = 0;
+    curr.window_id = window_id;
+    fwrite(&curr, sizeof(trace_instr_format_t), 1, g_out);
+    fflush(g_out);
+    fclose(g_out);
+    g_out = nullptr;
+  }
 }
 
 int main(int argc, char* argv[])
@@ -472,6 +515,7 @@ int main(int argc, char* argv[])
   INS_AddInstrumentFunction(Instruction, nullptr);
   PIN_AddThreadStartFunction(ThreadStart, nullptr);
   PIN_AddThreadFiniFunction(ThreadFini, nullptr);
+  PIN_AddFiniFunction(Fini, nullptr);
 
   PIN_StartProgram();
   return 0;

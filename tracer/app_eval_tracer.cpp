@@ -46,7 +46,7 @@ KNOB<std::string> KnobPhaseOut(KNOB_MODE_WRITEONCE, "pintool", "phase_out", "ppk
 // ---------- helper: insert unique into fixed array ----------
 
  // Convert integer to hex string
- std::string intToHex(uint64_t value) {
+ inline std::string intToHex(uint64_t value) {
   std::ostringstream oss;
   oss << std::hex << std::uppercase << value;
   return oss.str();
@@ -65,6 +65,8 @@ struct thread_state_t {
   
   SetAssocTLB tlb;
   FILE* phase_fp = nullptr;
+
+  thread_state_t() : tlb(128, 16, 4096) {}
 };
 
 static inline uint64_t vpn4k(uint64_t addr) { return addr >> 12; }
@@ -131,8 +133,8 @@ static inline void MaybeEndWindow(thread_state_t* st, THREADID tid)
   double jac = 0.0;
   jac = (double)intersect/(st->prev_pages4k.size() + uniq4k - intersect);
 
-  SetAssocTLB::Stats stat_obj = st->tlb.stats();
-  uint64_t total_misses = stat_obj.misses;
+  // SetAssocTLB::Stats stat_obj = st->tlb.stats();
+  // uint64_t total_misses = stat_obj.misses;
 
   // log (file, NOT stdout)
   if (st->phase_fp) {

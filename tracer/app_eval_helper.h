@@ -14,7 +14,7 @@
 #include <iomanip>      // std::setprecision
 #include <optional>     // std::optional
 #include <cassert>      // assert
-
+#include <sstream>
 // -------------------------------
 // A tiny helper to compute log2 for powers of two.
 // -------------------------------
