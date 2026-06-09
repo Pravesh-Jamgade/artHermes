@@ -161,7 +161,7 @@ def main():
                         f"{pin_path} "
                         f"-t {pintool_path} -s 0 -t {args.sim} "
                         f"-w {args.trace_windows} -phase_file {t['APP_PHASE']} -o {trace_arg} "
-                        f"-- {t['APP_PATH']} {t['APP_INPUT']}"
+                        f"-- {t['APP_PATH']} {t['APP_INPUT']}  > /dev/null"
                     )
                 task_queue.append({'name': run_name, 'simcmd': simcmd, 'pincmd': pincmd, 'log': log_file})
                 runjobs.write(simcmd+'\n')
@@ -257,11 +257,12 @@ def main():
                         # Separate log for sim and pin
                         log_base, log_ext = os.path.splitext(task['log'])
                         sim_log = f"{log_base}_sim{log_ext}"
+                        pin_log = f"{log_base}_pin{log_ext}"
                         
                         f_sim = open(sim_log, "w")
-                        
+                        f_pin = open(pin_log, "w")
                         # Launch PIN job first, then SIM job
-                        p_pin = subprocess.Popen(task['pincmd'], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        p_pin = subprocess.Popen(task['pincmd'], shell=True, stdout=f_pin, stderr=subprocess.STDOUT)
                         p_sim = subprocess.Popen(task['simcmd'], shell=True, stdout=f_sim, stderr=subprocess.STDOUT)
                         processes = [
                             {'proc': p_pin, 'type': 'pin'},

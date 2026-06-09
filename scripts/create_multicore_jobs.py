@@ -56,14 +56,25 @@ def parse_files(exp_path, trace_path):
         step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), val)
         final_exps[key] = os.path.expandvars(step1)
 
+    trace_path = os.environ.get('HERMES_TRACE', os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    workload_mix_pattern = r"\(([a-zA-Z0-9_\-.]+)\)x(\d+)"
     for t in traces:
         if 'TRACE' in t:
             raw_paths = t['TRACE'].split(',')
             resolved_paths = []
             for rpath in raw_paths:
-                step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), rpath)
-                resolved = os.path.normpath(os.path.expandvars(step1))
-                resolved_paths.append(resolved)
+                matches = re.findall(workload_mix_pattern, rpath)
+                print(f"[DEBUG] Resolving trace path: {rpath} | Matches: {matches}")
+                if len(matches) == 0:
+                    resolved = os.path.join(trace_path, rpath.strip())
+                    resolved_paths.append(resolved)
+                else:
+                    for match in matches:
+                        wl_name, count = match
+                        count = int(count)
+                        for i in range(count):
+                            resolved = os.path.join(trace_path, wl_name)
+                            resolved_paths.append(resolved)
             t['TRACES'] = resolved_paths
         else:
             t['TRACES'] = []
