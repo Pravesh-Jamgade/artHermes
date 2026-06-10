@@ -1062,6 +1062,7 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
 
 void print_deadlock(uint32_t i)
 {
+    print_history();
     cout << "\n================ DEADLOCK SYSTEM STATE ================\n";
     cout << "CPU: " << i << " cycle: " << current_core_cycle[i] << "\n";
     cout << "ROB(head/tail/occ/size): " << ooo_cpu[i].ROB.head << "/" << ooo_cpu[i].ROB.tail << "/" << ooo_cpu[i].ROB.occupancy << "/" << ooo_cpu[i].ROB.SIZE << "\n";

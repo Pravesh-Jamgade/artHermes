@@ -208,7 +208,7 @@ public:
     bool oracle_predictor(PACKET* packet);
   
     // Check if walk can proceed
-    bool is_walk_queue_available();
+    bool is_walk_queue_available(uint64_t vaddr);
 
     // Print PTW statistics
     void print_stats();

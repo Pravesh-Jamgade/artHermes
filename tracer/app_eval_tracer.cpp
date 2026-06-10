@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <fstream>
+#include <set>
 #include "app_eval_helper.h"
 
 /*
@@ -60,8 +61,8 @@ struct thread_state_t {
   uint64_t win_instr = 0;
   uint64_t win_id = 0;
 
-  std::unordered_set<uint64_t> pages4k;
-  std::unordered_set<uint64_t> prev_pages4k;
+  std::set<uint64_t> pages4k;
+  std::set<uint64_t> prev_pages4k;
   
   SetAssocTLB tlb;
   FILE* phase_fp = nullptr;

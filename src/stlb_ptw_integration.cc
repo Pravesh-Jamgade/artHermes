@@ -70,7 +70,7 @@ extern "C" bool handle_stlb_miss(void* cpu_ptr, PACKET* packet) {
 
     // Pravesh: Comment out PTW initiate_page_walk code
     // Check if PTW queue is available
-    if (!ptw->is_walk_queue_available()) {
+    if (!ptw->is_walk_queue_available(packet->full_addr)) {
         return false; // PTW queue is full, stall the request
     }
     

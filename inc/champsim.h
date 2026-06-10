@@ -18,6 +18,7 @@
 #include <random>
 #include <string>
 #include <iomanip>
+#include <set>
 
 #include "defs.h"
 
@@ -88,4 +89,25 @@ class RANDOM {
     };
 };
 extern uint64_t champsim_seed;
+
+struct PacketHistoryEvent {
+    uint64_t cycle;
+    uint64_t instr_id;
+    uint64_t address;
+    uint64_t full_addr;
+    char type[32];
+    char event_type[32];
+    char cache_name[32];
+    uint8_t hit_in_wq;
+    uint8_t cache_hit;
+    uint8_t cache_miss;
+    uint8_t mshr_merge;
+    uint64_t merged_with_instr_id;
+    uint8_t hit_where;
+    int8_t ptw_level;
+};
+
+void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t address, uint64_t full_addr, uint8_t type, const char* event_type, const char* cache_name, bool hit_in_wq, bool cache_hit, bool cache_miss, bool mshr_merge, uint64_t merged_with_instr_id, int hit_where, int ptw_level = -1);
+void print_history();
+
 #endif

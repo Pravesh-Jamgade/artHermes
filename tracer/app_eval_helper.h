@@ -9,10 +9,9 @@
 
 #include <cstdint>      // uint64_t
 #include <vector>       // std::vector
-#include <unordered_set>// std::unordered_set
+#include <set>          // std::set
 #include <iostream>     // std::cout
 #include <iomanip>      // std::setprecision
-#include <optional>     // std::optional
 #include <cassert>      // assert
 #include <sstream>
 // -------------------------------
@@ -282,7 +281,7 @@ private:
 
     FullyAssocShadow shadow_;     // fully-assoc shadow of same capacity (3C classification)
 
-    std::unordered_set<uint64_t> ever_seen_; // tracks whether VPN has been referenced before (compulsory)
+    std::set<uint64_t> ever_seen_; // tracks whether VPN has been referenced before (compulsory)
 
     uint64_t tick_ = 0;           // LRU clock
     Stats stats_;

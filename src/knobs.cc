@@ -433,6 +433,8 @@ namespace knob
 	bool enable_translation_ocp = false;
 	// oracle which knows whether data is on/off-chip
 	bool enable_oracle_ptw_pred = false;
+	// parallel walk allowed
+	int bw_parallel_walk = 16;
 
 	// When true: instruction-side translation is resolved via the buddy allocator
 	// at zero latency (no ITLB/STLB/PTW cost).  When false: instructions go
@@ -1920,6 +1922,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if(MATCH("", "enable_oracle_ptw_pred"))
 	{
 		knob::enable_oracle_ptw_pred = !strcmp(value, "true") ? true : false;
+	}
+	else if(MATCH("", "bw_parallel_walk"))
+	{
+		knob::bw_parallel_walk = atoi(value);
 	}
 	// Direcr DRAM Prefetch (DDRP)
 	else if (MATCH("", "enable_ddrp"))

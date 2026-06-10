@@ -552,6 +552,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     int wq_index = check_dram_queue(&WQ[channel], packet);
     if (wq_index != -1) 
     {
+        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
         if (return_data_to_core) 
         {
             packet->data = WQ[channel].entry[wq_index].data;
@@ -628,6 +629,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     assert(index == -1 || knob::enable_ddrp);
     if (index != -1)
     {
+        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_RQ_MERGE", NAME.c_str(), false, false, false, true, RQ[channel].entry[index].instr_id, packet->hit_where);
         DDRP_DP ( if(warmup_complete[packet->cpu]) {
         cout << "[" << NAME << "_RQ] " <<  __func__ << " instr_id: " << packet->instr_id << " address: " << hex << packet->address;
         cout << " full_addr: " << packet->full_addr << dec << " LLC_MISS_MERGE_IN_RQ";
@@ -707,6 +709,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         if (RQ[channel].entry[index].address == 0) 
         {    
             RQ[channel].entry[index] = *packet;
+            add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_DRAM_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
             RQ[channel].occupancy++;
             RQ[channel].entry[index].enque_cycle[IS_DRAM][IS_RQ] = uncore.cycle;
             rq_enqueue_count++;
@@ -768,14 +771,17 @@ int MEMORY_CONTROLLER::add_wq(PACKET *packet)
     // check for duplicates in the write queue
     uint32_t channel = dram_get_channel(packet->address);
     int index = check_dram_queue(&WQ[channel], packet);
-    if (index != -1)
+    if (index != -1) {
+        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_WQ_MERGE", NAME.c_str(), false, false, false, true, WQ[channel].entry[index].instr_id, packet->hit_where);
         return index; // merged index
+    }
 
     // search for the empty index
     for (index=0; index<DRAM_WQ_SIZE; index++) {
         if (WQ[channel].entry[index].address == 0) {
             
             WQ[channel].entry[index] = *packet;
+            add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_DRAM_WQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
             WQ[channel].occupancy++;
             WQ[channel].entry[index].enque_cycle[IS_DRAM][IS_WQ] = uncore.cycle;
             
