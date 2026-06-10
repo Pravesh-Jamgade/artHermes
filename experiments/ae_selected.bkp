@@ -42,10 +42,6 @@ NAME=merced_0000.champsim-008
 TRACE=$(HERMES_TRACE)/merced_0000.champsim-008.gz
 KNOBS=
 
-NAME=rwkv_trace_1.champsimtrace-015
-TRACE=$(HERMES_TRACE)/rwkv_trace_1.champsimtrace-015.gz
-KNOBS=
-
 NAME=sierra_a_3_0000
 TRACE=$(HERMES_TRACE)/sierra.a.3_0000.champsim-021.gz
 KNOBS=
