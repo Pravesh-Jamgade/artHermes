@@ -1,4 +1,4 @@
 APP_PATH=$(GRAPH_APP)/bc
 APP_INPUT=-f $(GRAPH_INPUT)/rmatU.sg 
-APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki_bc_with_rmatu.csv
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
 
