@@ -1620,8 +1620,6 @@ int main(int argc, char** argv)
     int found_traces = 0;
     int count_traces = 0;
 
-    vector<tracereader*> traces;
-
     for (int i=0; i<argc; i++) {
         if (found_traces)
         {
@@ -1856,6 +1854,13 @@ int main(int argc, char** argv)
         ooo_cpu[i].page_table_walker->l1d = &ooo_cpu[i].L1D;
         ooo_cpu[i].page_table_walker->l2 = &ooo_cpu[i].L2C;
         ooo_cpu[i].page_table_walker->llc = &uncore.LLC;
+
+        // smt thread initialization
+        // unintialize with -1 for easier debugging of uninitialized accesses
+        ooo_cpu[i].thread = vector<int>(knob::num_threads_per_core, -1);
+        for(int j=0; j< knob::num_threads_per_core; j++) {
+            ooo_cpu[i].thread[j] = j + (i * knob::num_threads_per_core);
+        } 
     }
 
     uncore.LLC.llc_initialize_replacement();

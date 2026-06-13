@@ -58,9 +58,11 @@ void O3_CPU::initialize_core()
 
 O3_CPU::~O3_CPU()
 {
-    if (trace_reader) {
-        delete trace_reader;
+   for(auto t: trace_reader){
+    if(t){
+        delete t;
     }
+   }
 }
 
 void print_core_config()
@@ -94,7 +96,7 @@ void O3_CPU::read_from_trace()
 
     uint8_t continue_reading = 1;
     uint32_t num_reads = 0;
-    instrs_to_read_this_cycle = FETCH_WIDTH;
+    instrs_to_read_this_cycle = FETCH_WIDTH
 
     if (!trace_reader) {
         trace_reader = get_tracereader(trace_string, cpu, knob::cloudsuite);

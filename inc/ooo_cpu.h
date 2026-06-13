@@ -32,6 +32,7 @@ namespace knob
     extern float sleep_frac;
     extern bool enable_app_driven;
     extern bool enable_libc_buffered;
+    extern int num_threads_per_core;
 }
 
 class load_per_ip_info_t
@@ -71,10 +72,11 @@ public:
 
     // trace
     FILE *trace_file;
-    tracereader *trace_reader;
+    vector<tracereader*> trace_reader;
     char trace_string[1024];
     char gunzip_command[1024];
     IWCounter* interval_counter;
+    vector<int> thread;
 
     // instruction
     input_instr next_instr;

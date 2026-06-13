@@ -447,6 +447,8 @@ namespace knob
 	// When true: read traces using libc managed buffer strategy (FIFO/file with setvbuf)
 	bool enable_libc_buffered = false;
 	bool enable_shmem_buffered = false;
+
+	int num_threads_per_core = 1;
 }
 
 std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
@@ -2017,7 +2019,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	{
 		knob::sleep_frac = atof(value);
 	}
-	
+	else if(MATCH("", "num_threads_per_core"))
+	{
+		knob::num_threads_per_core = atoi(value);
+	}
 
     else
     {
