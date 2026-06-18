@@ -18,6 +18,7 @@ namespace knob
     extern uint32_t dram_cntlr_ddrp_buffer_sets;
     extern uint32_t dram_cntlr_ddrp_buffer_assoc;
     extern uint32_t dram_cntlr_ddrp_buffer_hash_type;
+    extern bool     cloudsuite;
 }
 
 // initialized in main.cc
@@ -216,6 +217,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
                 // real allocation — let buddy allocator pick any free physical page
                 if (page_fault) {
 
+                    stall_cycle[queue->entry[index].cpu] = 100;
                     PTEStatus pte_status = PTEStatus::NO_FAULT;
                     if(ddrp_req)
                     {
@@ -229,7 +231,8 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
 
                 if(queue->entry[index].ptw_level == 0)
                 {
-                    buddy_allocator.map_vpage_to_pframe(queue->entry[index].virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
+                    uint64_t tagged_vpage = (queue->entry[index].virt_addr >> LOG2_PAGE_SIZE);
+                    buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
                 }
     
                 queue->entry[index].data = pte_data;
@@ -512,6 +515,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         // real allocation — let buddy allocator pick any free physical page
         if (is_pf) {
 
+            stall_cycle[packet->cpu] = 100;
             pte_data = buddy_allocator.access();
             PTEStatus pte_status = PTEStatus::NO_FAULT;
             if(ddrp_req)
@@ -524,7 +528,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         
         if(packet->ptw_level == 0)
         {
-            buddy_allocator.map_vpage_to_pframe(packet->virt_addr >> LOG2_PAGE_SIZE, pte_data >> LOG2_PAGE_SIZE);
+            uint64_t tagged_vpage = (packet->virt_addr >> LOG2_PAGE_SIZE);
+            buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
         }
 
         // return pte value to cache hierarchy
@@ -552,7 +557,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     int wq_index = check_dram_queue(&WQ[channel], packet);
     if (wq_index != -1) 
     {
-        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
+        add_history_event(uncore.cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "DRAM_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
         if (return_data_to_core) 
         {
             packet->data = WQ[channel].entry[wq_index].data;
@@ -629,7 +634,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     assert(index == -1 || knob::enable_ddrp);
     if (index != -1)
     {
-        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_RQ_MERGE", NAME.c_str(), false, false, false, true, RQ[channel].entry[index].instr_id, packet->hit_where);
+        add_history_event(uncore.cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "DRAM_RQ_MERGE", NAME.c_str(), false, false, false, true, RQ[channel].entry[index].instr_id, packet->hit_where);
         DDRP_DP ( if(warmup_complete[packet->cpu]) {
         cout << "[" << NAME << "_RQ] " <<  __func__ << " instr_id: " << packet->instr_id << " address: " << hex << packet->address;
         cout << " full_addr: " << packet->full_addr << dec << " LLC_MISS_MERGE_IN_RQ";
@@ -709,7 +714,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         if (RQ[channel].entry[index].address == 0) 
         {    
             RQ[channel].entry[index] = *packet;
-            add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_DRAM_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+            add_history_event(uncore.cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_DRAM_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
             RQ[channel].occupancy++;
             RQ[channel].entry[index].enque_cycle[IS_DRAM][IS_RQ] = uncore.cycle;
             rq_enqueue_count++;
@@ -772,7 +777,7 @@ int MEMORY_CONTROLLER::add_wq(PACKET *packet)
     uint32_t channel = dram_get_channel(packet->address);
     int index = check_dram_queue(&WQ[channel], packet);
     if (index != -1) {
-        add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "DRAM_WQ_MERGE", NAME.c_str(), false, false, false, true, WQ[channel].entry[index].instr_id, packet->hit_where);
+        add_history_event(uncore.cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "DRAM_WQ_MERGE", NAME.c_str(), false, false, false, true, WQ[channel].entry[index].instr_id, packet->hit_where);
         return index; // merged index
     }
 
@@ -781,7 +786,7 @@ int MEMORY_CONTROLLER::add_wq(PACKET *packet)
         if (WQ[channel].entry[index].address == 0) {
             
             WQ[channel].entry[index] = *packet;
-            add_history_event(uncore.cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_DRAM_WQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+            add_history_event(uncore.cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_DRAM_WQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
             WQ[channel].occupancy++;
             WQ[channel].entry[index].enque_cycle[IS_DRAM][IS_WQ] = uncore.cycle;
             

@@ -58,9 +58,12 @@ extern uint64_t current_core_cycle[NUM_CPUS],
                 last_drc_write_mode,
                 drc_blocks;
 
+#include <vector>
 extern queue <uint64_t> page_queue;
-extern map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_CPUS];
-extern uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
+extern map <uint64_t, uint64_t> page_table, inverse_table, recent_page;
+extern vector<map<uint64_t, uint64_t>> unique_cl;
+extern uint64_t previous_ppage, num_adjacent_page, allocated_pages;
+extern vector<uint64_t> num_cl, num_page, minor_fault, major_fault;
 
 void print_stats();
 uint64_t rotl64 (uint64_t n, unsigned int c),
@@ -93,6 +96,7 @@ extern uint64_t champsim_seed;
 struct PacketHistoryEvent {
     uint64_t cycle;
     uint64_t instr_id;
+    uint64_t virt_addr;
     uint64_t address;
     uint64_t full_addr;
     char type[32];
@@ -107,7 +111,7 @@ struct PacketHistoryEvent {
     int8_t ptw_level;
 };
 
-void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t address, uint64_t full_addr, uint8_t type, const char* event_type, const char* cache_name, bool hit_in_wq, bool cache_hit, bool cache_miss, bool mshr_merge, uint64_t merged_with_instr_id, int hit_where, int ptw_level = -1);
+void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t virt_addr, uint64_t address, uint64_t full_addr, uint8_t type, const char* event_type, const char* cache_name, bool hit_in_wq, bool cache_hit, bool cache_miss, bool mshr_merge, uint64_t merged_with_instr_id, int hit_where, int ptw_level = -1);
 void print_history();
 
 #endif

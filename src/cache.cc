@@ -246,7 +246,7 @@ void CACHE::handle_fill()
             // COLLECT STATS
             sim_miss[fill_cpu][MSHR.entry[mshr_index].type]++;
             sim_access[fill_cpu][MSHR.entry[mshr_index].type]++;
-            add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL_BYPASS", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
+            add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].virt_addr, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL_BYPASS", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
 
             // check fill level
             if (MSHR.entry[mshr_index].fill_level < fill_level) 
@@ -405,7 +405,7 @@ void CACHE::handle_fill()
             }
 
             fill_cache(set, way, &MSHR.entry[mshr_index]);
-            add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
+            add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].virt_addr, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
 
             // Deadblock pred: store prediction in block on fill, reset usage, train
             if (cache_type == IS_LLC && MSHR.entry[mshr_index].type == LOAD 
@@ -922,6 +922,8 @@ void CACHE::handle_read()
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
 
+            // cout <<NAME<< ",read,cpu,"<<read_cpu<<",addr,"<<hex2str(rq_entry.address)<<",vaddr,"<<hex2str(rq_entry.virt_addr)<<",lvl,"<<rq_entry.ptw_level<<'\n'; 
+
             cache_logger.log("handle_read", NAME, "addr", hex2str(rq_entry.address), "instr", rq_entry.instr_id, "type", +rq_entry.type, "current-cy", current_core_cycle[rq_entry.cpu], '\n');
 
             // access cache
@@ -958,8 +960,11 @@ void CACHE::handle_read()
             
             if (way >= 0) // read hit
             {
+
+                // cout <<NAME<< ",hit,cpu,"<<read_cpu<<",addr,"<<hex2str(rq_entry.address)<<",vaddr,"<<hex2str(rq_entry.virt_addr)<<",lvl,"<<rq_entry.ptw_level<<'\n'; 
+                
                 rq_entry.hit_where = assign_hit_where(cache_type, 0); // read hit
-                add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.address, rq_entry.full_addr, rq_entry.type, "CACHE_HIT", NAME.c_str(), false, true, false, false, 0, rq_entry.hit_where);
+                add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.virt_addr, rq_entry.address, rq_entry.full_addr, rq_entry.type, "CACHE_HIT", NAME.c_str(), false, true, false, false, 0, rq_entry.hit_where);
 
                 if (cache_type == IS_ITLB) 
                 {
@@ -1116,7 +1121,7 @@ void CACHE::handle_read()
             }
             else // read miss
             {
-                add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.address, rq_entry.full_addr, rq_entry.type, "CACHE_MISS", NAME.c_str(), false, false, true, false, 0, rq_entry.hit_where);
+                add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.virt_addr, rq_entry.address, rq_entry.full_addr, rq_entry.type, "CACHE_MISS", NAME.c_str(), false, false, true, false, 0, rq_entry.hit_where);
                 DP ( if (warmup_complete[read_cpu]) {
                 cout << "[" << NAME << "] " << __func__ << " read miss";
                 cout << " instr_id: " << rq_entry.instr_id << " address: " << hex << rq_entry.address;
@@ -1210,7 +1215,7 @@ void CACHE::handle_read()
                         {
                             if (cache_type == IS_STLB)
                             {
-                                uint64_t pa = va_to_pa(read_cpu, rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
+                                uint64_t pa = va_to_pa(rq_entry.asid[1], rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
                                 rq_entry.data = pa >> LOG2_PAGE_SIZE;
                                 rq_entry.event_cycle = current_core_cycle[read_cpu];
                                 rq_entry.hit_where = hit_where_t::PTW; // STLB miss => PTW
@@ -1230,8 +1235,10 @@ void CACHE::handle_read()
                     }
                     else if (mshr_index != -1)  // already in-flight miss
                     {
+                        // cout <<NAME<< ",merge,cpu,"<<read_cpu<<",addr,"<<hex2str(rq_entry.address)<<",vaddr,"<<hex2str(rq_entry.virt_addr)<<",lvl,"<<rq_entry.ptw_level<<'\n'; 
+
                         rq_entry.hit_where = assign_hit_where(cache_type, 3); // MSHR hit
-                        add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.address, rq_entry.full_addr, rq_entry.type, "MSHR_MERGE", NAME.c_str(), false, false, false, true, MSHR.entry[mshr_index].instr_id, rq_entry.hit_where);
+                        add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.virt_addr, rq_entry.address, rq_entry.full_addr, rq_entry.type, "MSHR_MERGE", NAME.c_str(), false, false, false, true, MSHR.entry[mshr_index].instr_id, rq_entry.hit_where);
                         
                         // if (rq_entry.type == TRANSLATION) {
                         //     l.log(NAME, "handle_read", "MERGE",
@@ -1943,7 +1950,7 @@ int CACHE::add_rq(PACKET *packet)
         // l.log(NAME, "WQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, "fetch=", packet->fetch_packet, '\n');
         packet->hit_where = assign_hit_where(cache_type, 2); // hit in WQ
         uint64_t cur_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
-        add_history_event(cur_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "RQ_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
+        add_history_event(cur_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "RQ_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
 
         // check fill level
         if (packet->fill_level < fill_level) 
@@ -2018,7 +2025,7 @@ int CACHE::add_rq(PACKET *packet)
         packet->hit_where = assign_hit_where(cache_type, 1); // hit in RQ
         PACKET& rq_entry = RQ->get_entry(index);
         uint64_t cur_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
-        add_history_event(cur_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "RQ_MERGE", NAME.c_str(), false, false, false, true, rq_entry.instr_id, packet->hit_where);
+        add_history_event(cur_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "RQ_MERGE", NAME.c_str(), false, false, false, true, rq_entry.instr_id, packet->hit_where);
 
         if (packet->instruction) 
         {
@@ -2091,7 +2098,7 @@ int CACHE::add_rq(PACKET *packet)
     uint64_t enque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
     index = RQ->add_queue(packet, enque_cycle);
     PACKET& rq_entry = RQ->get_entry(index);
-    add_history_event(enque_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+    add_history_event(enque_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
 
     // ADD LATENCY
     if (rq_entry.event_cycle < current_core_cycle[packet->cpu])
@@ -2135,7 +2142,7 @@ int CACHE::add_wq(PACKET *packet)
     if (index != -1) 
     {
         uint64_t cur_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
-        add_history_event(cur_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "WQ_MERGE", NAME.c_str(), false, false, false, true, WQ.entry[index].instr_id, packet->hit_where);
+        add_history_event(cur_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "WQ_MERGE", NAME.c_str(), false, false, false, true, WQ.entry[index].instr_id, packet->hit_where);
 
         WQ.MERGED++;
         WQ.ACCESS++;
@@ -2154,7 +2161,7 @@ int CACHE::add_wq(PACKET *packet)
     // if there is no duplicate, add it to the write queue
     uint64_t enque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
     index = WQ.add_queue(packet, enque_cycle);
-    add_history_event(enque_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_WQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+    add_history_event(enque_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_WQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
     // index = WQ.tail;
     // if (WQ.entry[index].address != 0) 
     // {
@@ -2286,7 +2293,7 @@ int CACHE::add_pq(PACKET *packet)
     {
         packet->hit_where = assign_hit_where(cache_type, 2); // prefetch hitting in WQ
         uint64_t cur_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
-        add_history_event(cur_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "PQ_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
+        add_history_event(cur_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "PQ_WQ_HIT", NAME.c_str(), true, false, false, false, 0, packet->hit_where);
 
         // check fill level
         if (packet->fill_level < fill_level) 
@@ -2331,7 +2338,7 @@ int CACHE::add_pq(PACKET *packet)
     if (index != -1) 
     {
         uint64_t cur_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
-        add_history_event(cur_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "PQ_MERGE", NAME.c_str(), false, false, false, true, PQ.entry[index].instr_id, packet->hit_where);
+        add_history_event(cur_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "PQ_MERGE", NAME.c_str(), false, false, false, true, PQ.entry[index].instr_id, packet->hit_where);
         if (packet->fill_level < PQ.entry[index].fill_level)
 	    {
             PQ.entry[index].fill_level = packet->fill_level;
@@ -2372,7 +2379,7 @@ int CACHE::add_pq(PACKET *packet)
     // if there is no duplicate, add it to PQ
     uint64_t enque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[packet->cpu];
     index = PQ.add_queue(packet, enque_cycle);
-    add_history_event(enque_cycle, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_PQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+    add_history_event(enque_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_PQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
 //     index = PQ.tail;
 
 // #ifdef SANITY_CHECK
@@ -2458,6 +2465,8 @@ void CACHE::return_data(PACKET *packet)
         MSHR.entry[mshr_index].event_cycle += LATENCY;
 
     update_fill_cycle();
+
+    // cout <<NAME<< ",return,cpu,"<<packet->cpu<<",addr,"<<hex2str(packet->address)<<",vaddr,"<<hex2str(packet->virt_addr)<<",lvl,"<<packet->ptw_level<<'\n'; 
 
     DP (if (warmup_complete[packet->cpu]) {
     cout << "[" << NAME << "_MSHR] " <<  __func__ << " instr_id: " << MSHR.entry[mshr_index].instr_id;
@@ -2551,7 +2560,7 @@ void CACHE::add_mshr(PACKET *packet)
     uint32_t index = 0;
 
     packet->cycle_enqueued = current_core_cycle[packet->cpu];
-    add_history_event(packet->cycle_enqueued, packet->instr_id, packet->address, packet->full_addr, packet->type, "ADD_MSHR", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
+    add_history_event(packet->cycle_enqueued, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_MSHR", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
 
     // search mshr
     for (index=0; index<MSHR_SIZE; index++) 

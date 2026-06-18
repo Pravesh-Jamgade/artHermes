@@ -5,12 +5,15 @@
 #include <cstring>
 #include <assert.h>
 
-const int HISTORY_LIMIT = 500;
+const int HISTORY_LIMIT = 1000;
 PacketHistoryEvent packet_history[HISTORY_LIMIT];
 int history_head = 0;
 int history_count = 0;
 
-void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t address, uint64_t full_addr, uint8_t type, const char* event_type, const char* cache_name, bool hit_in_wq, bool cache_hit, bool cache_miss, bool mshr_merge, uint64_t merged_with_instr_id, int hit_where, int ptw_level) {
+void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t virt_addr, uint64_t address, uint64_t full_addr, 
+                            uint8_t type, const char* event_type, const char* cache_name, 
+                            bool hit_in_wq, bool cache_hit, bool cache_miss, bool mshr_merge, 
+                            uint64_t merged_with_instr_id, int hit_where, int ptw_level) {
     const char* type_name = "UNKNOWN";
     if (type == 0) type_name = "LOAD";
     else if (type == 1) type_name = "RFO";
@@ -53,6 +56,7 @@ void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t address, uint
     PacketHistoryEvent& ev = packet_history[history_head];
     ev.cycle = cycle;
     ev.instr_id = instr_id;
+    ev.virt_addr = virt_addr;
     ev.address = address;
     ev.full_addr = full_addr;
     strncpy(ev.type, type_name, sizeof(ev.type) - 1);
@@ -76,11 +80,13 @@ void add_history_event(uint64_t cycle, uint64_t instr_id, uint64_t address, uint
 }
 
 void print_history() {
-    std::cout << "\n================ PACKET HISTORY EVENT DUMP (LAST 500 EVENTS) ================\n";
+    std::cout << "\n================ PACKET HISTORY EVENT DUMP (PAST EVENTS) ================\n";
     std::cout << std::left 
               << std::setw(6)  << "Idx"
+              << std::setw(3)  << "cpu"
               << std::setw(12) << "Cycle"
               << std::setw(12) << "Instr ID"
+              << std::setw(16) << "Virt Addr"
               << std::setw(16) << "Address"
               << std::setw(16) << "Full Addr"
               << std::setw(12) << "Type"
@@ -116,6 +122,7 @@ void print_history() {
                   << std::setw(6)  << i
                   << std::setw(12) << ev.cycle
                   << std::setw(12) << ev.instr_id
+                  << "0x" << std::setw(14) << std::hex << ev.virt_addr << std::dec
                   << "0x" << std::setw(14) << std::hex << ev.address << std::dec
                   << "0x" << std::setw(14) << std::hex << ev.full_addr << std::dec
                   << std::setw(12) << ev.type

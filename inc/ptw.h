@@ -77,7 +77,7 @@ public:
     class CACHE *l1d, *l2, *llc;
 
     // CPU-indexed CR3 register base addresses (100GB stride)
-    uint64_t cr3_base_addrs[NUM_CPUS];
+    uint64_t cr3_base_addrs[256];
 
     
     // 4 levels of Page Walk Cache

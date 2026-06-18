@@ -103,8 +103,10 @@ time_t start_time;
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
 queue <uint64_t > page_queue;
-map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_CPUS];
-uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
+map <uint64_t, uint64_t> page_table, inverse_table, recent_page;
+vector<map<uint64_t, uint64_t>> unique_cl;
+uint64_t previous_ppage, num_adjacent_page, allocated_pages;
+vector<uint64_t> num_cl, num_page, minor_fault, major_fault;
 
 string is_data_names[2] = {"instruction", "data"};
 string type_names[NUM_TYPES] = {"load", "RFO", "prefetch", "writeback", "translation"};
@@ -893,8 +895,15 @@ void print_dram_stats()
 
 void print_addr_translation_stats(uint32_t cpu)
 {
-    cout << "Core_" << cpu << "_major_fault " << major_fault[cpu] << endl
-        << "Core_" << cpu << "_minor_fault " << minor_fault[cpu] << endl
+    uint64_t core_major_fault = 0;
+    uint64_t core_minor_fault = 0;
+    for (int j = 0; j < knob::num_threads_per_core; j++) {
+        int tid = j + (cpu * knob::num_threads_per_core);
+        core_major_fault += major_fault[tid];
+        core_minor_fault += minor_fault[tid];
+    }
+    cout << "Core_" << cpu << "_major_fault " << core_major_fault << endl
+        << "Core_" << cpu << "_minor_fault " << core_minor_fault << endl
         << endl;
 }
 
@@ -922,6 +931,11 @@ void finish_warmup()
 
         ooo_cpu[i].begin_sim_cycle = current_core_cycle[i]; 
         ooo_cpu[i].begin_sim_instr = ooo_cpu[i].num_retired;
+        
+        for (int j = 0; j < knob::num_threads_per_core; j++) {
+            ooo_cpu[i].thread_begin_sim_instr[j] = ooo_cpu[i].thread_num_retired[j];
+            cout << "  Thread " << j << " retired: " << ooo_cpu[i].thread_num_retired[j] << endl;
+        }
 	
         ooo_cpu[i].reset_stats();
 
@@ -981,7 +995,7 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
     //     auto &e = ooo_cpu[cpu].LQ.entry[j];
     //     if (e.instr_id == 0)
     //         continue;
-    //     if (!filter.matches(e.instr_id, e.ip))
+    //     if (!filter.matches(e.instr_id, e.ip))// testing cpu example
     //         continue;
     //     cout << "[TRACK][LQ] idx=" << j << " instr_id=" << e.instr_id
     //          << " paddr=0x" << hex << e.physical_address << " vaddr=0x" << e.virtual_address << dec
@@ -993,7 +1007,7 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
     //     auto &e = ooo_cpu[cpu].SQ.entry[j];
     //     if (e.instr_id == 0)
     //         continue;
-    //     if (!filter.matches(e.instr_id, e.ip))
+    //     if (!filter.matches(e.instr_id, e.ip))// testing cpu example
     //         continue;
     //     cout << "[TRACK][SQ] idx=" << j << " instr_id=" << e.instr_id
     //          << " paddr=0x" << hex << e.physical_address << dec
@@ -1004,42 +1018,51 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
     auto print_packet_queue = [&](const string &name, PACKET_QUEUE *q) {
         for (uint32_t j = 0; j < q->SIZE; j++) {
             auto &pkt = q->entry[j];
-            if (pkt.cpu == NUM_CPUS)
-                continue;
-            if (!filter.matches(pkt.instr_id, pkt.ip))
+            // if (pkt.cpu == NUM_CPUS)
+            //     continue;
+
+            // since our tracker tracks instr_id and address (or it could be ip) both by passing env
+            // address or ip can be passed based on need, but change "pkt.address" to "pkt.ip" 
+            // in the filter.matches() function in case of tracking ip and make sure you set env to your desired ip.
+            //example, here i pass env "TRACK_ADDR" with "cpu" number and changed call to "matches" to use cpu value from packet
+            if (!filter.matches(pkt.instr_id, (uint64_t)pkt.ip))
                 continue;
             cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
                  << " full_addr=0x" << hex << pkt.full_addr << dec
                  << " type=" << +pkt.type << " translated=" << +pkt.translated
                  << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
-                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip) << endl;
+                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip) << " c=" << pkt.cpu << endl;
         }
     };
 
     auto print_base_queue = [&](const string &name, PACKET_QUEUE_BASE *q) {
         for (uint32_t j = 0; j < q->SIZE; j++) {
             PACKET &pkt = q->get_entry(j);
-            if (pkt.cpu == NUM_CPUS)
-                continue;
-            if (!filter.matches(pkt.instr_id, pkt.ip))
+            // if (pkt.cpu == NUM_CPUS)
+            //     continue;
+            // since our tracker tracks instr_id and address (or it could be ip) both by passing env
+            // address or ip can be passed based on need, but change "pkt.address" to "pkt.ip" 
+            // in the filter.matches() function in case of tracking ip and make sure you set env to your desired ip.
+            
+            if (!filter.matches(pkt.instr_id, (uint64_t)pkt.ip))
                 continue;
             cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
                  << " full_addr=0x" << hex << pkt.full_addr << dec
                  << " type=" << +pkt.type << " translated=" << +pkt.translated
                  << " fetched=" << +pkt.fetched << " returned=" << +pkt.returned
-                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip) << endl;
+                 << " event_cycle=" << pkt.event_cycle << " ip=" << hex2str(pkt.ip)<< " c=" << pkt.cpu << endl;
         }
     };
 
-    print_packet_queue(ooo_cpu[cpu].DTLB.MSHR.NAME, &ooo_cpu[cpu].DTLB.MSHR);
-    print_packet_queue(ooo_cpu[cpu].ITLB.MSHR.NAME, &ooo_cpu[cpu].ITLB.MSHR);
-    print_packet_queue(ooo_cpu[cpu].STLB.MSHR.NAME, &ooo_cpu[cpu].STLB.MSHR);
-    print_packet_queue(ooo_cpu[cpu].L1I.MSHR.NAME, &ooo_cpu[cpu].L1I.MSHR);
-    print_packet_queue(ooo_cpu[cpu].L1I.PROCESSED.NAME, &ooo_cpu[cpu].L1I.PROCESSED);
-    print_packet_queue(ooo_cpu[cpu].L1D.MSHR.NAME, &ooo_cpu[cpu].L1D.MSHR);
-    print_packet_queue(ooo_cpu[cpu].L1D.PROCESSED.NAME, &ooo_cpu[cpu].L1D.PROCESSED);
-    print_packet_queue(ooo_cpu[cpu].L2C.MSHR.NAME, &ooo_cpu[cpu].L2C.MSHR);
-    print_packet_queue(uncore.LLC.MSHR.NAME, &uncore.LLC.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].DTLB.MSHR.NAME, &ooo_cpu[cpu].DTLB.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].ITLB.MSHR.NAME, &ooo_cpu[cpu].ITLB.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].STLB.MSHR.NAME, &ooo_cpu[cpu].STLB.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].L1I.MSHR.NAME, &ooo_cpu[cpu].L1I.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].L1I.PROCESSED.NAME, &ooo_cpu[cpu].L1I.PROCESSED);
+    // print_packet_queue(ooo_cpu[cpu].L1D.MSHR.NAME, &ooo_cpu[cpu].L1D.MSHR);
+    // print_packet_queue(ooo_cpu[cpu].L1D.PROCESSED.NAME, &ooo_cpu[cpu].L1D.PROCESSED);
+    // print_packet_queue(ooo_cpu[cpu].L2C.MSHR.NAME, &ooo_cpu[cpu].L2C.MSHR);
+    // print_packet_queue(uncore.LLC.MSHR.NAME, &uncore.LLC.MSHR);
 
     print_base_queue(ooo_cpu[cpu].DTLB.RQ->NAME, ooo_cpu[cpu].DTLB.RQ);
     print_base_queue(ooo_cpu[cpu].ITLB.RQ->NAME, ooo_cpu[cpu].ITLB.RQ);
@@ -1048,16 +1071,16 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
     print_base_queue(ooo_cpu[cpu].L2C.RQ->NAME, ooo_cpu[cpu].L2C.RQ);
     print_base_queue(uncore.LLC.RQ->NAME, uncore.LLC.RQ);
 
-    for (int m = 0; m < PTW_MSHR_SIZE; m++) {
-        auto &me = ooo_cpu[cpu].page_table_walker->mshr[m];
-        if (!me.valid)
-            continue;
-        if (!filter.matches(me.instr_id, me.packet.ip))
-            continue;
-        cout << "[TRACK][PTW_MSHR] idx=" << m << " instr_id=" << me.instr_id
-             << " pte_addr=0x" << hex << me.current_pte_addr << " vaddr=0x" << me.vaddr << dec
-             << " level=" << me.current_level << " ip=" << hex2str(me.packet.ip) << endl;
-    }
+    // for (int m = 0; m < PTW_MSHR_SIZE; m++) {
+    //     auto &me = ooo_cpu[cpu].page_table_walker->mshr[m];
+    //     if (!me.valid)
+    //         continue;
+    //     if (!filter.matches(me.instr_id, me.packet.ip))
+    //         continue;
+    //     cout << "[TRACK][PTW_MSHR] idx=" << m << " instr_id=" << me.instr_id
+    //          << " pte_addr=0x" << hex << me.current_pte_addr << " vaddr=0x" << me.vaddr << dec
+    //          << " level=" << me.current_level << " ip=" << hex2str(me.packet.ip) << endl;
+    // }
 }
 
 void print_deadlock(uint32_t i)
@@ -1254,7 +1277,6 @@ void print_deadlock(uint32_t i)
                  << std::dec << ", type, " << +rq.entry[i].type << endl;
         }
     }
-    assert(0);
 } 
 
 
@@ -1593,6 +1615,13 @@ int main(int argc, char** argv)
 
     parse_args(argc, argv);
 
+    int total_threads = NUM_CPUS * knob::num_threads_per_core;
+    unique_cl.resize(total_threads);
+    num_cl.resize(total_threads, 0);
+    num_page.resize(total_threads, 0);
+    minor_fault.resize(total_threads, 0);
+    major_fault.resize(total_threads, 0);
+
     if(knob::cloudsuite)
     {
         MAX_INSTR_DESTINATIONS = NUM_INSTR_DESTINATIONS_SPARC;
@@ -1616,6 +1645,11 @@ int main(int argc, char** argv)
 
     // end consequence of knobs
 
+    for (int i=0; i<NUM_CPUS; i++) {
+        ooo_cpu[i].thread_trace_string.resize(knob::num_threads_per_core);
+        ooo_cpu[i].trace_reader.resize(knob::num_threads_per_core, nullptr);
+    }
+
     // search through the argv for "-traces"
     int found_traces = 0;
     int count_traces = 0;
@@ -1623,82 +1657,29 @@ int main(int argc, char** argv)
     for (int i=0; i<argc; i++) {
         if (found_traces)
         {
+            int core_idx = count_traces / knob::num_threads_per_core;
+            int thread_idx = count_traces % knob::num_threads_per_core;
+
             if (knob::enable_app_driven) {
-                printf("CPU_%d reads trace path: %s\n", count_traces, argv[i]);
-                sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
-                ooo_cpu[count_traces].trace_file = NULL;
+                printf("CPU_%d Thread_%d reads trace path: %s\n", core_idx, thread_idx, argv[i]);
+                sprintf(ooo_cpu[core_idx].trace_string, "%s", argv[i]);
+                ooo_cpu[core_idx].thread_trace_string[thread_idx] = argv[i];
+                ooo_cpu[core_idx].trace_file = NULL;
             } else {
-                printf("CPU_%d runs %s\n", count_traces, argv[i]);
+                printf("CPU_%d Thread_%d runs %s\n", core_idx, thread_idx, argv[i]);
 
-                sprintf(ooo_cpu[count_traces].trace_string, "%s", argv[i]);
-                cout << " SSSSSSSSSSSSSS"  << ooo_cpu[count_traces].trace_string << '\n';
-
-                // std::string full_name(argv[i]);
-                // std::string last_dot = full_name.substr(full_name.find_last_of("."));
-
-                // std::string fmtstr;
-                // std::string decomp_program;
-                // if (full_name.substr(0,4) == "http")
-                // {
-                //     // Check file exists
-                //     char testfile_command[4096];
-                //     sprintf(testfile_command, "wget -q --spider %s", argv[i]);
-                //     FILE *testfile = popen(testfile_command, "r");
-                //     if (pclose(testfile))
-                //     {
-                //         std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                //         assert(0 && "Remote trace file does not exist or is inaccessible");
-                //     }
-                //     fmtstr = "wget -qO- %2$s | %1$s -dc";
-                // }
-                // else
-                // {
-                //     std::ifstream testfile(argv[i]);
-                //     if (!testfile.good())
-                //     {
-                //         std::cerr << "TRACE FILE NOT FOUND: " << argv[i] << std::endl;
-                //         assert(0 && "Local trace file does not exist or is not readable");
-                //     }
-                //     fmtstr = "%1$s -dc %2$s";
-                // }
-
-                // if (last_dot[1] == 'g') // gzip format
-                //     decomp_program = "gzip";
-                // else if (last_dot[1] == 'x') // xz
-                //     decomp_program = "xz";
-                // else {
-                //     std::cout << "ChampSim does not support traces other than gz or xz compression!" << std::endl;
-                //     assert(0);
-                // }
-
-                // sprintf(ooo_cpu[count_traces].gunzip_command, fmtstr.c_str(), decomp_program.c_str(), argv[i]);
-
-                // char *pch[100];
-                // int count_str = 0;
-                // pch[0] = strtok (argv[i], " /,.-");
-                // while (pch[count_str] != NULL) {
-                //     //printf ("%s %d\n", pch[count_str], count_str);
-                //     count_str++;
-                //     pch[count_str] = strtok (NULL, " /,.-");
-                // }
-
-                // //printf("max count_str: %d\n", count_str);
-                // //printf("application: %s\n", pch[count_str-3]);
-
-                // int j = 0;
-                // while (pch[count_str-3][j] != '\0') {
-                //     seed_number += pch[count_str-3][j];
-                //     //printf("%c %d %d\n", pch[count_str-3][j], j, seed_number);
-                //     j++;
-                // }
-                ooo_cpu[count_traces].trace_file = NULL;
+                sprintf(ooo_cpu[core_idx].trace_string, "%s", argv[i]);
+                ooo_cpu[core_idx].thread_trace_string[thread_idx] = argv[i];
+                cout << " SSSSSSSSSSSSSS"  << ooo_cpu[core_idx].trace_string << '\n';
+                ooo_cpu[core_idx].trace_file = NULL;
             }
 
             count_traces++;
-            if (count_traces > NUM_CPUS) {
-                printf("\n*** Too many traces for the configured number of cores ***\n");
-                printf("count_traces=%d NUM_CPUS=%d\n\n", count_traces, NUM_CPUS);
-                assert(0 && "Number of traces exceeds NUM_CPUS");
+            int expected_max_traces = NUM_CPUS * knob::num_threads_per_core;
+            if (count_traces > expected_max_traces) {
+                printf("\n*** Too many traces for the configured number of cores/threads ***\n");
+                printf("count_traces=%d expected_max_traces=%d\n\n", count_traces, expected_max_traces);
+                assert(0 && "Number of traces exceeds expectations");
             }
         }
         else if(strcmp(argv[i],"-traces") == 0) {
@@ -1706,8 +1687,9 @@ int main(int argc, char** argv)
         }
     }
 
-    if (count_traces != NUM_CPUS) {
-        printf("\n*** Not enough traces for the configured number of cores ***\n\n");
+    int expected_traces = NUM_CPUS * knob::num_threads_per_core;
+    if (count_traces != expected_traces) {
+        printf("\n*** Not enough traces for the configured number of cores/threads ***\n\n");
         assert(0);
     }
     // end trace file setup
@@ -1861,6 +1843,15 @@ int main(int argc, char** argv)
         for(int j=0; j< knob::num_threads_per_core; j++) {
             ooo_cpu[i].thread[j] = j + (i * knob::num_threads_per_core);
         } 
+
+        ooo_cpu[i].last_thread_read.resize(NUM_CPUS, 0);
+        ooo_cpu[i].thread_num_retired.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_begin_sim_instr.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_last_sim_instr.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_finish_sim_instr.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_sim_instructions_read.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_warmup_complete.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_simulation_complete.resize(knob::num_threads_per_core, 0); 
     }
 
     uncore.LLC.llc_initialize_replacement();
@@ -1951,6 +1942,7 @@ int main(int argc, char** argv)
             // heartbeat information
             if (show_heartbeat && (ooo_cpu[i].num_retired >= ooo_cpu[i].next_print_instruction)) 
             {
+                cout << "X cpu 1, read " << ooo_cpu[1].instr_read <<", "<< ooo_cpu[1].thread_num_retired[0] << ", " <<  ooo_cpu[1].warmup_instructions << ", occ<buff?, " << (ooo_cpu[1].IFETCH_BUFFER.occupancy < ooo_cpu[1].IFETCH_BUFFER.SIZE) << ", stall?, " << +(ooo_cpu[1].fetch_stall) << '\n';
                 float cumulative_ipc;
                 if (warmup_complete[i])
                 {
@@ -1976,51 +1968,87 @@ int main(int argc, char** argv)
             {
                 print_deadlock(i);
             }
-
+            
             // check for warmup
             // warmup complete
-            if ((warmup_complete[i] == 0) && (ooo_cpu[i].num_retired > ooo_cpu[i].warmup_instructions))
-            {
-                warmup_complete[i] = 1;
-                all_warmup_complete++;
+            for (int j = 0; j < knob::num_threads_per_core; j++) {
+                if ((ooo_cpu[i].thread_warmup_complete[j] == 0) && (ooo_cpu[i].thread_num_retired[j] > ooo_cpu[i].warmup_instructions)) {
+                    ooo_cpu[i].thread_warmup_complete[j] = 1;
+                    all_warmup_complete++;
+                }
             }
-            if (all_warmup_complete == NUM_CPUS) // this part is called only once when all cores are warmed up
+
+            int total_threads = NUM_CPUS * knob::num_threads_per_core;
+            if (all_warmup_complete == total_threads) // this part is called only once when all threads are warmed up
             {
                 all_warmup_complete++;
+                for (int c = 0; c < NUM_CPUS; c++) {
+                    warmup_complete[c] = 1;
+                }
                 finish_warmup();
             }
 
-            /*
-            if (all_warmup_complete == 0) { 
-                all_warmup_complete = 1;
-                finish_warmup();
-            }
-            if (ooo_cpu[1].num_retired > 0)
-                warmup_complete[1] = 1;
-            */
-            
             // simulation complete
-            bool trace_ended = (ooo_cpu[i].trace_reader && ooo_cpu[i].trace_reader->eof());
+            bool trace_ended = false;
+            if (!ooo_cpu[i].trace_reader.empty()) {
+                trace_ended = true;
+                for (auto t : ooo_cpu[i].trace_reader) {
+                    if (t && !t->eof()) {
+                        trace_ended = false;
+                        break;
+                    }
+                }
+            }
             bool core_drained = (ooo_cpu[i].IFETCH_BUFFER.occupancy == 0) && 
                                 (ooo_cpu[i].DECODE_BUFFER.occupancy == 0) && 
                                 (ooo_cpu[i].ROB.occupancy == 0) && 
                                 (ooo_cpu[i].LQ.occupancy == 0) && 
                                 (ooo_cpu[i].SQ.occupancy == 0);
 
+            if (trace_ended && core_drained && (all_warmup_complete <= total_threads))
+            {
+                // Force warmup completion
+                for (int c = 0; c < NUM_CPUS; c++) {
+                    warmup_complete[c] = 1;
+                    for (int j = 0; j < knob::num_threads_per_core; j++) {
+                        ooo_cpu[c].thread_warmup_complete[j] = 1;
+                    }
+                }
+                all_warmup_complete = total_threads + 1;
+                finish_warmup();
+            }
+
+            for (int j = 0; j < knob::num_threads_per_core; j++) {
+                if ((all_warmup_complete > total_threads) && (ooo_cpu[i].thread_simulation_complete[j] == 0)) {
+                    bool thread_trace_ended = (ooo_cpu[i].trace_reader[j] && ooo_cpu[i].trace_reader[j]->eof());
+                    bool thread_done = (ooo_cpu[i].thread_num_retired[j] >= ooo_cpu[i].thread_begin_sim_instr[j] + ooo_cpu[i].simulation_instructions) ||
+                                       (thread_trace_ended && (ooo_cpu[i].get_in_flight_instructions(j) == 0));
+
+                    if (thread_done) {
+                        ooo_cpu[i].thread_simulation_complete[j] = 1;
+                        ooo_cpu[i].thread_finish_sim_instr[j] = ooo_cpu[i].thread_num_retired[j] - ooo_cpu[i].thread_begin_sim_instr[j];
+                        
+                        cout << "Finished CPU " << i << " Thread " << j 
+                             << " instructions: " << ooo_cpu[i].thread_finish_sim_instr[j]
+                             << " cycles: " << (current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle)
+                             << " cumulative IPC: " << ((float) ooo_cpu[i].thread_finish_sim_instr[j] / (current_core_cycle[i] - ooo_cpu[i].begin_sim_cycle)) << endl;
+                        
+                        all_simulation_complete++;
+                    }
+                }
+            }
+
             if (simulation_complete[i] == 0)
             {
-                if (trace_ended && core_drained && (all_warmup_complete <= NUM_CPUS))
-                {
-                    // Force warmup completion
-                    for (int c = 0; c < NUM_CPUS; c++) {
-                        warmup_complete[c] = 1;
+                bool core_threads_complete = true;
+                for (int j = 0; j < knob::num_threads_per_core; j++) {
+                    if (ooo_cpu[i].thread_simulation_complete[j] == 0) {
+                        core_threads_complete = false;
+                        break;
                     }
-                    all_warmup_complete = NUM_CPUS + 1;
-                    finish_warmup();
                 }
 
-                if ((all_warmup_complete > NUM_CPUS) && 
-                    ((ooo_cpu[i].num_retired >= (ooo_cpu[i].begin_sim_instr + ooo_cpu[i].simulation_instructions)) || (trace_ended && core_drained)))
+                if ((all_warmup_complete > total_threads) && core_threads_complete)
                 {
                     simulation_complete[i] = 1;
                     ooo_cpu[i].finish_sim_instr = ooo_cpu[i].num_retired - ooo_cpu[i].begin_sim_instr;
@@ -2038,12 +2066,10 @@ int main(int argc, char** argv)
                     record_roi_stats(i, &ooo_cpu[i].L1I);
                     record_roi_stats(i, &ooo_cpu[i].L2C);
                     record_roi_stats(i, &uncore.LLC);
-
-                    all_simulation_complete++;
                 }
             }
 
-            if (all_simulation_complete == NUM_CPUS)
+            if (all_simulation_complete == total_threads)
                 run_simulation = 0;
         }
 

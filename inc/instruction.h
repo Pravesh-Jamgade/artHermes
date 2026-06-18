@@ -12,6 +12,11 @@
 
 using namespace std;
 
+namespace knob
+{
+    extern int num_threads_per_core;
+}
+
 struct context_instr {
   uint64_t destination_memory[NUM_INSTR_DESTINATIONS] = {};
   uint64_t source_memory[NUM_INSTR_SOURCES] = {};
@@ -159,9 +164,9 @@ class ooo_model_instr {
     // executed bit is set after all dependencies are eliminated and this instr is chosen on a cycle, according to EXEC_WIDTH
     int executed;
 
-    uint8_t destination_registers[NUM_INSTR_DESTINATIONS_SPARC]; // output registers
+    uint32_t destination_registers[NUM_INSTR_DESTINATIONS_SPARC]; // output registers
 
-    uint8_t source_registers[NUM_INSTR_SOURCES]; // input registers 
+    uint32_t source_registers[NUM_INSTR_SOURCES]; // input registers 
 
     // these are instruction ids of other instructions in the window
     //int64_t registers_instrs_i_depend_on[NUM_INSTR_SOURCES];

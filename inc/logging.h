@@ -92,17 +92,17 @@ inline void parse_env_list(const char* env_str, std::vector<uint64_t>& out_list)
 static PacketTrackerFilter get_packet_tracker_filter()
 {
     PacketTrackerFilter f;
-    if (const char *instr_env = std::getenv("PACKET_TRACK_INSTR_ID")) {
+    if (const char *instr_env = std::getenv("TRACK_INSTR_ID")) {
         f.track_instr = true;
         parse_env_list(instr_env, f.instr_id);
         // std::cout << "Tracking packets for instruction ID: " << f.instr_id << std::endl;
     }
-    if (const char *addr_env = std::getenv("PACKET_TRACK_FULL_ADDR")) {
+    if (const char *addr_env = std::getenv("TRACK_FULL_ADDR")) {
         f.track_addr = true;
         parse_env_list(addr_env, f.ip);
         // std::cout << "Tracking packets for full address: 0x" << std::hex << f.ip << std::dec << std::endl;
-
     }
+  
     return f;
 }
 

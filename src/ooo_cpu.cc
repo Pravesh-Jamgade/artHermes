@@ -65,6 +65,28 @@ O3_CPU::~O3_CPU()
    }
 }
 
+uint32_t O3_CPU::get_in_flight_instructions(int thread_id)
+{
+    uint32_t count = 0;
+    int global_tid = thread_id + (cpu * knob::num_threads_per_core);
+    for (uint32_t i = 0; i < IFETCH_BUFFER.SIZE; i++) {
+        if (IFETCH_BUFFER.entry[i].ip != 0 && IFETCH_BUFFER.entry[i].asid[1] == global_tid) {
+            count++;
+        }
+    }
+    for (uint32_t i = 0; i < DECODE_BUFFER.SIZE; i++) {
+        if (DECODE_BUFFER.entry[i].ip != 0 && DECODE_BUFFER.entry[i].asid[1] == global_tid) {
+            count++;
+        }
+    }
+    for (uint32_t i = 0; i < ROB.SIZE; i++) {
+        if (ROB.entry[i].ip != 0 && ROB.entry[i].asid[1] == global_tid) {
+            count++;
+        }
+    }
+    return count;
+}
+
 void print_core_config()
 {
     cout << "fetch_width " << FETCH_WIDTH << endl
@@ -86,7 +108,33 @@ void print_core_config()
 
 void O3_CPU::read_from_trace()
 {
-    if (trace_reader && trace_reader->eof()) {
+    if(cpu == 1) cout << "call from cpu 1, attempt to read-th " << instr_read << '\n'; 
+    if (trace_reader.empty()) {
+        trace_reader.resize(knob::num_threads_per_core, nullptr);
+    }
+
+    for (int j = 0; j < knob::num_threads_per_core; j++) {
+        if (!trace_reader[j]) {
+            trace_reader[j] = get_tracereader(thread_trace_string[j], j, knob::cloudsuite);
+        }
+    }
+    
+    bool any_active = false;
+    for (int j = 0; j < knob::num_threads_per_core; j++) {
+        bool thread_active = (trace_reader[j] && !trace_reader[j]->eof());
+        if (thread_simulation_complete[j]) {
+            thread_active = false;
+        }
+        if (warmup_complete[cpu] && thread_sim_instructions_read[j] >= simulation_instructions) {
+            thread_active = false;
+        }
+        if (thread_active) {
+            any_active = true;
+            break;
+        }
+    }
+
+    if (!any_active) {
         return;
     }
 
@@ -96,19 +144,64 @@ void O3_CPU::read_from_trace()
 
     uint8_t continue_reading = 1;
     uint32_t num_reads = 0;
-    instrs_to_read_this_cycle = FETCH_WIDTH
-
-    if (!trace_reader) {
-        trace_reader = get_tracereader(trace_string, cpu, knob::cloudsuite);
-    }
+    instrs_to_read_this_cycle = FETCH_WIDTH;
 
     // first, read PIN trace
     while (continue_reading) 
     {
-        ooo_model_instr arch_instr = trace_reader->get();
+        int thread_to_read = 0;
+        if(knob::num_threads_per_core > 1)
+        {
+            thread_to_read = -1;
+            for (int attempts = 0; attempts < knob::num_threads_per_core; attempts++) {
+                int j = (last_thread_read[cpu] + attempts) % knob::num_threads_per_core;
+                if((thread_warmup_complete[j] || thread_simulation_complete[j]) && last_thread_read[cpu] == j) continue;
+                bool thread_active = (trace_reader[j] && !trace_reader[j]->eof());
+            
+                if (warmup_complete[cpu] && thread_sim_instructions_read[j] >= simulation_instructions) {
+                    thread_active = false;
+                }
+                
+                if (thread_active) {
+                    thread_to_read = j;
+                    break;
+                }
+            }
+
+            if (thread_to_read == -1) {
+                continue_reading = 0;
+                break;
+            }
+
+            last_thread_read[cpu] = thread_to_read;
+        }
+
+        ooo_model_instr arch_instr = trace_reader[thread_to_read]->get();
+        instr_read++;
+
+        if (warmup_complete[cpu]) {
+            thread_sim_instructions_read[thread_to_read]++;
+        }
 
         // set the unique instruction id
         arch_instr.instr_id = instr_unique_id;
+
+        // Tag virtual addresses with SMT thread's ASID (8 bit) in the most significant position, between bit position including [55-48]
+        if (knob::num_threads_per_core > 1 || knob::cloudsuite) {
+            uint64_t asid_mask = (((uint64_t)arch_instr.asid[1]) & 0x1FFULL) << 48;
+            arch_instr.ip = arch_instr.ip | asid_mask;
+
+            for (uint32_t i = 0; i < NUM_INSTR_DESTINATIONS_SPARC; i++) {
+                if (arch_instr.destination_memory[i]) {
+                    arch_instr.destination_memory[i] = arch_instr.destination_memory[i] | asid_mask;
+                }
+            }
+            for (uint32_t i = 0; i < NUM_INSTR_SOURCES; i++) {
+                if (arch_instr.source_memory[i]) {
+                    arch_instr.source_memory[i] = arch_instr.source_memory[i] | asid_mask;
+                }
+            }
+        }
 
         // enable 50 M skip in 100 M window
         if (knob::partial_window_trace)
@@ -279,6 +372,19 @@ void O3_CPU::read_from_trace()
         // add this instruction to the IFETCH_BUFFER
         if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE) 
         {
+            // Pravesh: offset register IDs for SMT
+            uint32_t max_dest = knob::cloudsuite ? NUM_INSTR_DESTINATIONS_SPARC : MAX_INSTR_DESTINATIONS;
+            for (uint32_t i = 0; i < max_dest; i++) {
+                if (arch_instr.destination_registers[i]) {
+                    arch_instr.destination_registers[i] += thread_to_read * 256;
+                }
+            }
+            for (uint32_t i = 0; i < NUM_INSTR_SOURCES; i++) {
+                if (arch_instr.source_registers[i]) {
+                    arch_instr.source_registers[i] += thread_to_read * 256;
+                }
+            }
+
             uint32_t ifetch_buffer_index = add_to_ifetch_buffer(&arch_instr);
             num_reads++;
 
@@ -409,7 +515,7 @@ uint32_t O3_CPU::add_to_ifetch_buffer(ooo_model_instr *arch_instr)
     // Oracle mode: resolve instruction-side translation instantly via the buddy
     // allocator (same physical-page map used by the DRAM fast-path) at zero cost.
     // No ITLB/STLB/PTW access is modelled for instruction fetches.
-    uint64_t vpage = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
+    uint64_t vpage = IFETCH_BUFFER.entry[index].ip  >> LOG2_PAGE_SIZE;
     uint64_t pframe_addr = buddy_allocator.get_pframe_addr(vpage);
     if (pframe_addr == 0) {
       // Page not yet mapped — allocate a physical frame via the buddy allocator.
@@ -548,11 +654,7 @@ void O3_CPU::fetch_instruction()
             trace_packet.fill_level = FILL_L1;
             trace_packet.fill_l1i = 1;
             trace_packet.cpu = cpu;
-            trace_packet.address = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
-            if (knob::cloudsuite)
-                trace_packet.address = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
-            else
-                trace_packet.address = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
+            trace_packet.address = (IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE);
             trace_packet.full_addr = IFETCH_BUFFER.entry[index].ip;
             trace_packet.instr_id = 0;
             trace_packet.rob_index = i;
@@ -561,8 +663,8 @@ void O3_CPU::fetch_instruction()
             trace_packet.producer = 0; // TODO: check if this guy gets used or not
             trace_packet.ip = IFETCH_BUFFER.entry[index].ip;
             trace_packet.type = LOAD; 
-            trace_packet.asid[0] = 0;
-            trace_packet.asid[1] = 0;
+            trace_packet.asid[0] = IFETCH_BUFFER.entry[index].asid[0];
+            trace_packet.asid[1] = IFETCH_BUFFER.entry[index].asid[1];
             trace_packet.event_cycle = current_core_cycle[cpu];
 
             int rq_index = ITLB.add_rq(&trace_packet);
@@ -575,18 +677,21 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                // cout << "sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
+                if(cpu == 1)
+                cout <<"cpu " << cpu << " trace sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
                 // successfully sent to the ITLB, so mark all instructions in the IFETCH_BUFFER that match this ip as translated INFLIGHT
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
-                    if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].translated == 0))
+                    if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].asid[1] == IFETCH_BUFFER.entry[index].asid[1]) && (IFETCH_BUFFER.entry[j].translated == 0))
                     {
-                        // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
+                        if(cpu == 1)
+                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = INFLIGHT;
                         IFETCH_BUFFER.entry[j].fetched = 0;
                     }
                 }
-                // cout << endl;
+                if(cpu == 1)
+                cout << endl;
 	        }
 	    }
 
@@ -610,8 +715,8 @@ void O3_CPU::fetch_instruction()
             fetch_packet.producer = 0;
             fetch_packet.ip = IFETCH_BUFFER.entry[index].ip;
             fetch_packet.type = LOAD; 
-            fetch_packet.asid[0] = 0;
-            fetch_packet.asid[1] = 0;
+            fetch_packet.asid[0] = IFETCH_BUFFER.entry[index].asid[0];
+            fetch_packet.asid[1] = IFETCH_BUFFER.entry[index].asid[1];
             fetch_packet.event_cycle = current_core_cycle[cpu];
             fetch_packet.fetch_packet = 1;
 
@@ -635,18 +740,21 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                // cout << "sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
+                if(cpu == 1)
+                cout <<"cpu " << cpu << " fetch_sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
                 // mark all instructions from this cache line as having been fetched
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
-                    if(((IFETCH_BUFFER.entry[j].ip)>>6) == ((IFETCH_BUFFER.entry[index].ip)>>6))
+                    if((((IFETCH_BUFFER.entry[j].ip)>>6) == ((IFETCH_BUFFER.entry[index].ip)>>6)) && (IFETCH_BUFFER.entry[j].asid[1] == IFETCH_BUFFER.entry[index].asid[1]))
                     {
-                        // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
+                        if(cpu == 1)
+                        cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = COMPLETED;
                         IFETCH_BUFFER.entry[j].fetched = INFLIGHT;
                     }
                 }
-                // cout << '\n';
+                if(cpu == 1)
+                cout << '\n';
 	        }
 	    }
 
@@ -1359,7 +1467,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
             continue;
 
         // forwarding should be done by the SQ entry that holds the same producer_id from RAW dependency check
-        if (SQ.entry[i].virtual_address == LQ.entry[lq_index].virtual_address) { // store-to-load forwarding check
+        if (SQ.entry[i].virtual_address == LQ.entry[lq_index].virtual_address && SQ.entry[i].asid[1] == LQ.entry[lq_index].asid[1]) { // store-to-load forwarding check
 
             // forwarding store is in the SQ
             if ((rob_index != ROB.head) && (LQ.entry[lq_index].producer_id == SQ.entry[i].instr_id)) { // RAW
@@ -1367,7 +1475,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
                 break; // should be break
             }
 
-            if ((LQ.entry[lq_index].producer_id == UINT64_MAX) && (LQ.entry[lq_index].instr_id <= SQ.entry[i].instr_id)) { // WAR 
+            if ((LQ.entry[lq_index].producer_id == UINT64_MAX) && (LQ.entry[lq_index].instr_id <= SQ.entry[i].instr_id) && (LQ.entry[lq_index].asid[1] == SQ.entry[i].asid[1])) { // WAR 
                 // a load is about to be added in the load queue and we found a store that is 
                 // "logically later in the program order but already executed" => this is not correctly executed WAR
                 // due to out-of-order execution, this case is possible, for example
@@ -1454,7 +1562,7 @@ void O3_CPU::mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_
         if (ROB.entry[prior].destination_memory[i] == 0)
             continue;
 
-        if (ROB.entry[prior].destination_memory[i] == ROB.entry[current].source_memory[data_index]) { //  store-to-load forwarding check
+        if (ROB.entry[prior].destination_memory[i] == ROB.entry[current].source_memory[data_index] && ROB.entry[prior].asid[1] == ROB.entry[current].asid[1]) { //  store-to-load forwarding check
 
             // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
             ROB.entry[prior].memory_instrs_depend_on_me.insert (current);   // this load cannot be executed until the prior store gets executed
@@ -1558,10 +1666,7 @@ void O3_CPU::operate_lsq()
                 data_packet.cpu = cpu;
                 data_packet.data_index = SQ.entry[sq_index].data_index;
                 data_packet.sq_index = sq_index;
-                if (knob::cloudsuite)
-                    data_packet.address = ((SQ.entry[sq_index].virtual_address >> LOG2_PAGE_SIZE) << 9) | SQ.entry[sq_index].asid[1];
-                else
-                    data_packet.address = SQ.entry[sq_index].virtual_address >> LOG2_PAGE_SIZE;
+                data_packet.address = SQ.entry[sq_index].virtual_address >> LOG2_PAGE_SIZE;
                 data_packet.full_addr = SQ.entry[sq_index].virtual_address;
                 data_packet.instr_id = SQ.entry[sq_index].instr_id;
                 data_packet.rob_index = SQ.entry[sq_index].rob_index;
@@ -1659,10 +1764,7 @@ void O3_CPU::operate_lsq()
                 data_packet.cpu = cpu;
                 data_packet.data_index = LQ.entry[lq_index].data_index;
                 data_packet.lq_index = lq_index;
-                if (knob::cloudsuite)
-                    data_packet.address = ((LQ.entry[lq_index].virtual_address >> LOG2_PAGE_SIZE) << 9) | LQ.entry[lq_index].asid[1];
-                else
-                    data_packet.address = LQ.entry[lq_index].virtual_address >> LOG2_PAGE_SIZE;
+                data_packet.address = LQ.entry[lq_index].virtual_address >> LOG2_PAGE_SIZE;
                 data_packet.full_addr = LQ.entry[lq_index].virtual_address;
                 data_packet.instr_id = LQ.entry[lq_index].instr_id;
                 data_packet.rob_index = LQ.entry[lq_index].rob_index;
@@ -1779,7 +1881,7 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
             // check if dependent loads are already added in the load queue
             for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) { // which one is dependent?
                 if (ROB.entry[dependent].source_memory[j] && ROB.entry[dependent].source_added[j]) {
-                    if (ROB.entry[dependent].source_memory[j] == SQ.entry[sq_index].virtual_address) { // this is required since a single instruction can issue multiple loads
+                    if (ROB.entry[dependent].source_memory[j] == SQ.entry[sq_index].virtual_address && ROB.entry[dependent].asid[1] == SQ.entry[sq_index].asid[1]) { // this is required since a single instruction can issue multiple loads
 
                         // now we can resolve RAW dependency
                         uint32_t lq_index = ROB.entry[dependent].lq_index[j];
@@ -2033,7 +2135,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 	    // mark the appropriate instructions in the IFETCH_BUFFER as translated and ready to fetch
 	    for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
 	    {
-	        if(((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((complete_ip)>>LOG2_PAGE_SIZE))
+	        if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((complete_ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].asid[1] == queue->entry[index].asid[1])) // 
 	        {
                 IFETCH_BUFFER.entry[j].translated = COMPLETED;
                 // we did not fetch this instruction's cache line, but we did translate it
@@ -2423,6 +2525,8 @@ void O3_CPU::retire_rob()
             accumulate_rob_load_latencies(&ROB.entry[ROB.head]);
         }
 
+        int thread_id = ROB.entry[ROB.head].asid[1] % knob::num_threads_per_core;
+
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;
 	
@@ -2437,6 +2541,7 @@ void O3_CPU::retire_rob()
         }
         completed_executions--;
         num_retired++;
+        thread_num_retired[thread_id]++;
 
         // call DDRP monitor
         if(knob::enable_ddrp_monitor && ddrp_monitor)

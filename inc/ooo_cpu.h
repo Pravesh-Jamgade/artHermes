@@ -77,6 +77,17 @@ public:
     char gunzip_command[1024];
     IWCounter* interval_counter;
     vector<int> thread;
+    vector<string> thread_trace_string;
+    vector<int> last_thread_read;
+
+    std::vector<uint64_t> thread_num_retired;
+    std::vector<uint64_t> thread_begin_sim_instr;
+    std::vector<uint64_t> thread_last_sim_instr;
+    std::vector<uint64_t> thread_finish_sim_instr;
+    std::vector<uint64_t> thread_sim_instructions_read;
+    std::vector<uint8_t> thread_warmup_complete;
+    std::vector<uint8_t> thread_simulation_complete;
+    uint64_t instr_read = 0;
 
     // instruction
     input_instr next_instr;
@@ -224,7 +235,6 @@ public:
 
         // trace
         trace_file = NULL;
-        trace_reader = NULL;
 
         interval_counter = new IWCounter(50000000, 0.25); // 50M instructions with 25% sampling
 
@@ -313,6 +323,8 @@ public:
     }
 
     ~O3_CPU();
+
+    uint32_t get_in_flight_instructions(int thread_id);
 
     void reset_stats()
     {
