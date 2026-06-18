@@ -74,4 +74,4 @@ LIB_ROOTS :=
 # This section contains the build rules for all binaries that have special build rules.
 # See makefile.default.rules for the default build rules.
 # Inject C++11/C++17 flag to ensure std::stoi and modern headers are supported
-TOOL_CXXFLAGS += -std=c++14
+TOOL_CXXFLAGS += -std=c++17 -Wa,--noexecstack

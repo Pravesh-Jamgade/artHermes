@@ -22,11 +22,10 @@ tracer_new.cpp
 static constexpr int NUM_INSTR_DESTINATIONS = 2;
 static constexpr int NUM_INSTR_SOURCES      = 4;
 
-uint64_t window_size = 0;
+int skip_initial_instructions = 0;
+int trace_remaining_instructions = 0;
 uint64_t window_id = 0;
-uint64_t traceable_window = 0;
 int instr_id = 0;
-uint64_t instruction_count = 0;
 volatile sig_atomic_t signal_received = 0;
 
 // uint32_t id = 0;// 1 for store , 2 for load
@@ -77,7 +76,10 @@ static THREADID tracked_tid = INVALID_THREADID;
 
 KNOB<UINT64> KnobSkipInstructions (KNOB_MODE_WRITEONCE, "pintool", "s", "0", "skip");
 KNOB<UINT64> KnobTraceInstructions(KNOB_MODE_WRITEONCE, "pintool", "t", "1000000", "trace");
-KNOB<std::string> KnobPhaseFileInstructions(KNOB_MODE_WRITEONCE, "pintool", "phase_file", "default_ppki.csv", "read phase file");
+KNOB<UINT64> KnobWindowSize(KNOB_MODE_WRITEONCE, "pintool", "window-size", "50000000", "trace");
+
+// Declare the knob as a string type to accept decimal/fraction inputs
+KNOB<std::string> KnobFraction(KNOB_MODE_WRITEONCE, "pintool", "skip-fraction", "0.5", "Fraction of window size to skip");
 KNOB<std::string> KnobOut(KNOB_MODE_WRITEONCE, "pintool", "o",
   "/tmp/champsim_trace.fifo", "trace output fifo/file");
 
@@ -113,93 +115,6 @@ std::vector<PhaseRow> phase_data;
 
 static FILE* g_out = nullptr;
 
-std::vector<PhaseRow> read_phase_csv(const std::string& filename)
-{
-    std::ifstream file(filename.c_str());
-    if (!file) {
-      std::cerr << "ERROR: Cannot open file: " << filename << std::endl;
-      PIN_ExitProcess(1);
-  }
-    std::vector<PhaseRow> rows;
-    std::string line;
-    int hot_window_count = 0;
-    int cold_window_count = 0;
-
-    // Skip header
-    std::getline(file, line);
-
-    while (std::getline(file, line)) {
-        if (line.empty()) continue;
-
-        std::stringstream ss(line);
-        std::string tok;
-        PhaseRow r;
-
-        std::getline(ss, tok, ','); r.tid = ::atoi(tok.c_str());
-        std::getline(ss, tok, ','); r.win_id = ::atoi(tok.c_str());
-        std::getline(ss, tok, ','); r.insts = ::strtoull(tok.c_str(), nullptr, 10);
-
-        std::getline(ss, tok, ','); r.uniq4k = ::strtoull(tok.c_str(), nullptr, 10);
-        std::getline(ss, tok, ','); r.ppki4k = ::strtod(tok.c_str(), nullptr);
-
-        std::getline(ss, tok, ','); r.new4k = ::strtoull(tok.c_str(), nullptr, 10);
-        std::getline(ss, tok, ','); r.newpageski = ::strtod(tok.c_str(), nullptr);
-        std::getline(ss, tok, ','); r.new_frac = ::strtod(tok.c_str(), nullptr);
-
-        std::getline(ss, tok, ','); r.jac = ::strtod(tok.c_str(), nullptr);
-        std::getline(ss, tok, ','); r.churn = ::strtod(tok.c_str(), nullptr);
-
-        std::getline(ss, tok, ','); r.cluster_id = ::atoi(tok.c_str());
-        std::getline(ss, tok, ','); r.hot = ::atoi(tok.c_str());
-
-        // std::cerr << "Before win_id: " << r.win_id << ", hot, " << r.hot << ", instr, " << r.insts << '\n';
-
-        window_size = r.insts;
-        rows.push_back(r);
-
-        hot_window_count += r.hot;
-        cold_window_count += (1 - r.hot);
-    }
-
-    if (rows.empty()) {
-      std::cerr << "ERROR: No phase rows found in " << filename << std::endl;
-      PIN_ExitProcess(1);
-    }
-
-    if (window_size == 0) {
-      std::cerr << "ERROR: window_size is 0" << std::endl;
-      PIN_ExitProcess(1);
-    }
-
-    uint64_t total_instructions = window_size * rows.size();
-    
-    uint64_t trace_instr_count = KnobTraceInstructions.Value();
-    int windows_needed = (trace_instr_count + window_size - 1) / window_size;
-
-    fprintf(stderr, "Total instructions: %lu\n", total_instructions);
-    fprintf(stderr, "%d cold windows, %d hot windows, %d required windows\n", cold_window_count, hot_window_count, windows_needed);
-
-
-    int k = 4;
-    while(windows_needed > hot_window_count && k--)
-    {
-      int total_windows = (cold_window_count+hot_window_count);
-      for(int i=1; i< total_windows && windows_needed > hot_window_count; i++)
-      {
-        if(rows[i-1].hot == 0)
-        {
-          rows[i].hot = 1;
-        }
-      }
-    }
-
-    file.close();
-
-    return rows;
-}
-
-
-
 template <typename T>
 static inline VOID WriteToSet(T* begin, T* end, T value)
 {
@@ -213,7 +128,6 @@ static inline thread_state_t* GetState(THREADID tid)
 {
   return static_cast<thread_state_t*>(PIN_GetThreadData(tls_key, tid));
 }
-
 
 VOID ResetCurrentInstruction(THREADID tid, ADDRINT ip)
 {
@@ -245,39 +159,17 @@ BOOL ShouldWrite(THREADID tid)
   const uint64_t n = st->instrCount;
   const uint64_t start = KnobSkipInstructions.Value() + 1;
   const uint64_t end   = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
+  const uint64_t window_size = KnobWindowSize.Value();
+  uint64_t new_window_id = (st->instrCount-1) / window_size;
 
-  uint64_t temp_new_window_id = (st->instrCount-1) / (window_size);
+  std::string fractionStr = KnobFraction.Value();
+  double fractionValue = std::stod(fractionStr); 
 
-  if(temp_new_window_id < phase_data.size())
-  {
-    bool change_phase = false;
-    if(window_id != temp_new_window_id)
-    {
-      change_phase = true;
-      window_id = temp_new_window_id;
-      if(phase_data[window_id].hot == 1)
-      {
-        traceable_window++;
-      }
-    }
-    
-    st->curr.trace_window = phase_data[window_id].hot;
-    st->curr.window_id = phase_data[window_id].win_id; 
-    
-    if(change_phase)
-      fprintf(stderr, "Hot=%d, Win=%lu, Traced=%lu\n", st->curr.trace_window, st->curr.window_id, traceable_window);
+  // New window start
+  if(new_window_id != window_id){
+    window_id = new_window_id;
   }
- 
-  if (n > end || temp_new_window_id >= phase_data.size()) {
-    std::cerr << "Exiting: (n > end  || temp_new_window_id >= phase_data.size())" << '\n';
-    std::cerr << (n>end) << ' ' << ' ' << (temp_new_window_id >= phase_data.size()) << '\n';
-    PIN_ExitApplication(0);
-    return FALSE;
-  }
-
-  return ((n >= start && n <= end) ? TRUE : FALSE) && phase_data[window_id].hot == 1 ; //phase_data[window_id].hot == 1 && 
 }
-
 
 VOID WriteCurrentInstruction(THREADID tid)
 {
@@ -489,8 +381,6 @@ int main(int argc, char* argv[])
   PIN_InitLock(&lock);
   tls_key = PIN_CreateThreadDataKey(nullptr);
 
-  std::string phase_file_name = KnobPhaseFileInstructions.Value();
-  phase_data = read_phase_csv(phase_file_name);
   open_trace_out();
 
   // buffered is GOOD

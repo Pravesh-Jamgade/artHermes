@@ -6,6 +6,10 @@ import subprocess
 import time
 from pathlib import Path
 
+'''
+* Pin command traces total warm + sim instruction. It is upto champsim to do warmup, Should we change it ? if we change it then keep
+    in mind that windows are counted from application start time.
+'''
 def parse_files(exp_path, trace_path):
     with open(exp_path, 'r') as f1, open(trace_path, 'r') as f2:
         exp_content = f1.read()
@@ -93,7 +97,7 @@ def main():
     # something as simple as Skip 50M in each 100M window by setting knob:partial_window_trace option
     parser.add_argument("-g", "--greedy-tracing", type=int, default=0, help="Greedy tracing")
     # OR THIS
-    parser.add_argument("-w", "--trace-windows", type=int, default=0, help="trace n hot windows")
+    # parser.add_argument("-w", "--trace-windows", type=int, default=0, help="trace n hot windows")
     # parser.add_argument("--phase-dir", type=str, default=0, help="hot phase file location")
     
     args = parser.parse_args()
@@ -159,8 +163,8 @@ def main():
                 if args.app_driven:
                     pincmd = (
                         f"{pin_path} "
-                        f"-t {pintool_path} -s 0 -t {args.sim} "
-                        f"-w {args.trace_windows} -phase_file {t['APP_PHASE']} -o {trace_arg} "
+                        f"-t {pintool_path} -s 0 -t {args.warm + args.sim} "
+                        f"-phase_file {t['APP_PHASE']} -o {trace_arg} "
                         f"-- {t['APP_PATH']} {t['APP_INPUT']}  > /dev/null"
                     )
                 task_queue.append({'name': run_name, 'simcmd': simcmd, 'pincmd': pincmd, 'log': log_file})
