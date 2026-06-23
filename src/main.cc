@@ -1942,7 +1942,6 @@ int main(int argc, char** argv)
             // heartbeat information
             if (show_heartbeat && (ooo_cpu[i].num_retired >= ooo_cpu[i].next_print_instruction)) 
             {
-                cout << "X cpu 1, read " << ooo_cpu[1].instr_read <<", "<< ooo_cpu[1].thread_num_retired[0] << ", " <<  ooo_cpu[1].warmup_instructions << ", occ<buff?, " << (ooo_cpu[1].IFETCH_BUFFER.occupancy < ooo_cpu[1].IFETCH_BUFFER.SIZE) << ", stall?, " << +(ooo_cpu[1].fetch_stall) << '\n';
                 float cumulative_ipc;
                 if (warmup_complete[i])
                 {
