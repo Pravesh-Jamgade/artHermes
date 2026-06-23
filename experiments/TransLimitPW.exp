@@ -28,8 +28,22 @@ HERMES_O = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=6
 HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
 TRACER = --config=$(HERMES_HOME)/config/tracer.ini
+PW_4 = --bw_parallel_walk=4
+PW_8 = --bw_parallel_walk=8
+PW_8 = --bw_parallel_walk=12
 
-normal   $(BASE) $(TRACER)
-
+#normal          $(BASE) $(TRACER)
 #ocp_oracle      $(BASE) $(OCP_ORACLE) $(TRACER)
 #ocp_trans       $(BASE) $(OCP_TRANS) $(TRACER)
+
+normal_4          $(BASE) $(PW_4)
+ocp_oracle_4      $(BASE) $(OCP_ORACLE) $(PW_4)
+ocp_trans_4       $(BASE) $(OCP_TRANS) $(PW_4)
+
+normal_8          $(BASE) $(PW_4)
+ocp_oracle_8      $(BASE) $(OCP_ORACLE) $(PW_4)
+ocp_trans_8       $(BASE) $(OCP_TRANS) $(PW_4)
+
+normal_12          $(BASE) $(PW_4)
+ocp_oracle_12      $(BASE) $(OCP_ORACLE) $(PW_4)
+ocp_trans_12       $(BASE) $(OCP_TRANS) $(PW_4)

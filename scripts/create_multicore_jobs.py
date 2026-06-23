@@ -90,6 +90,7 @@ def main():
     parser.add_argument("sim", type=int, help="Simulation instructions")
     parser.add_argument("-o", "--outdir", default="results_multicore", help="Directory to save logs")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Number of parallel slots (N)")
+    parser.add_argument("-s", "--smt", type=int, default=1, help="Threads per core; it will run all jobs in SMT. So go either SMT or Normal")
     
     args = parser.parse_args()
 
@@ -106,7 +107,9 @@ def main():
     required_cores = set()
     for t in traces:
         if t['TRACES']:
-            required_cores.add(len(t['TRACES']))
+            if args.smt == 2:
+                print(f"[Info] Building SMT={args.smt}\n")
+            required_cores.add(len(t['TRACES']) // args.smt)
         else:
             print(f"[ERROR] Trace config entry '{t.get('NAME', 'unknown')}' has no valid TRACE field.")
             sys.exit(1)
@@ -198,7 +201,7 @@ def main():
     runjobs_log_path = os.path.join(args.outdir, "runjobs.log")
     with open(runjobs_log_path, "w") as runjobs:
         for t in traces:
-            cores = len(t['TRACES'])
+            cores = len(t['TRACES']) // args.smt
             bin_path = cores_to_bin_path[cores]
             repeated_traces = " ".join(t['TRACES'])
 
