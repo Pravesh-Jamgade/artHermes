@@ -28,8 +28,8 @@ HERMES_O = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=6
 HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
 TRACER = --config=$(HERMES_HOME)/config/tracer.ini
-SMT = --num_threads_per_core=1
+SMT = --num_threads_per_core=2
 
-normal          $(BASE) $(SMT)
-#ocp_oracle      $(BASE) $(OCP_ORACLE) 
+#normal          $(BASE) $(SMT)
+ocp_oracle      $(BASE) $(OCP_ORACLE) $(SMT)
 #ocp_trans       $(BASE) $(OCP_TRANS)

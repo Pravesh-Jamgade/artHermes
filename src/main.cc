@@ -1822,6 +1822,7 @@ int main(int argc, char** argv)
         simulation_complete[i] = 0;
         current_core_cycle[i] = 0;
         stall_cycle[i] = 0;
+        stall_by_page_fault[i] = 0;
         
         previous_ppage = 0;
         num_adjacent_page = 0;
@@ -1928,14 +1929,18 @@ int main(int argc, char** argv)
                 {
                     ooo_cpu[i].decode_and_dispatch();
                 }
-	      
-                // fetch
-                ooo_cpu[i].fetch_instruction();
-	      
-                // read from trace
-                if ((ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE) && (ooo_cpu[i].fetch_stall == 0))
+                
+                // trying to immitate OS bubbles because of page-fault triggered OS routine spawning
+                if(stall_by_page_fault[i] <= current_core_cycle[i])
                 {
-                    ooo_cpu[i].read_from_trace();
+                    // fetch
+                    ooo_cpu[i].fetch_instruction();
+            
+                    // read from trace
+                    if ((ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE) && (ooo_cpu[i].fetch_stall == 0))
+                    {
+                        ooo_cpu[i].read_from_trace();
+                    }
                 }
 	        }
 

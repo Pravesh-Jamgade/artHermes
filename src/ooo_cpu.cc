@@ -21,6 +21,7 @@
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS]; 
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
+uint64_t stall_by_page_fault[NUM_CPUS];
 uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 
 namespace knob
@@ -108,7 +109,7 @@ void print_core_config()
 
 void O3_CPU::read_from_trace()
 {
-    if(cpu == 1) cout << "call from cpu 1, attempt to read-th " << instr_read << '\n'; 
+    // if(cpu == 1) cout << "call from cpu 1, attempt to read-th " << instr_read << '\n'; 
     if (trace_reader.empty()) {
         trace_reader.resize(knob::num_threads_per_core, nullptr);
     }
@@ -677,14 +678,14 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                if(cpu == 1)
+                // if(cpu == 1)
                 // cout <<"cpu " << cpu << " trace sent instr ip, " << hex2str(trace_packet.ip) << ", addr, " << hex2str(trace_packet.address) << ", childs ip: ";
                 // successfully sent to the ITLB, so mark all instructions in the IFETCH_BUFFER that match this ip as translated INFLIGHT
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if((((IFETCH_BUFFER.entry[j].ip)>>LOG2_PAGE_SIZE) == ((IFETCH_BUFFER.entry[index].ip)>>LOG2_PAGE_SIZE)) && (IFETCH_BUFFER.entry[j].asid[1] == IFETCH_BUFFER.entry[index].asid[1]) && (IFETCH_BUFFER.entry[j].translated == 0))
                     {
-                        if(cpu == 1)
+                        // if(cpu == 1)
                         // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = INFLIGHT;
                         IFETCH_BUFFER.entry[j].fetched = 0;
@@ -740,14 +741,14 @@ void O3_CPU::fetch_instruction()
 
             if(rq_index != -2)
             {
-                if(cpu == 1)
+                // if(cpu == 1)
                 // cout <<"cpu " << cpu << " fetch_sent instr ip, " << hex2str(fetch_packet.ip) << ", addr, " << hex2str(fetch_packet.address) << ", childs ip: ";
                 // mark all instructions from this cache line as having been fetched
                 for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
                 {
                     if((((IFETCH_BUFFER.entry[j].ip)>>6) == ((IFETCH_BUFFER.entry[index].ip)>>6)) && (IFETCH_BUFFER.entry[j].asid[1] == IFETCH_BUFFER.entry[index].asid[1]))
                     {
-                        if(cpu == 1)
+                        // if(cpu == 1)
                         // cout << hex2str(IFETCH_BUFFER.entry[j].ip) << ", ";
                         IFETCH_BUFFER.entry[j].translated = COMPLETED;
                         IFETCH_BUFFER.entry[j].fetched = INFLIGHT;
