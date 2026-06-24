@@ -21,3 +21,5 @@ obj/
 tools/gen_fwd_reuse
 tools/optcache_driver
 tracer/obj-intel64/
+
+setvars.sh
