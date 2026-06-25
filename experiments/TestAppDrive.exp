@@ -29,7 +29,7 @@ HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
 TRACER = --config=$(HERMES_HOME)/config/tracer.ini
 
-normal   $(BASE) $(TRACER)
+normal          $(BASE) $(TRACER)
+ocp_oracle      $(BASE) $(OCP_ORACLE) $(TRACER)
 
-#ocp_oracle      $(BASE) $(OCP_ORACLE) $(TRACER)
 #ocp_trans       $(BASE) $(OCP_TRANS) $(TRACER)
