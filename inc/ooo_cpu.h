@@ -33,6 +33,7 @@ namespace knob
     extern bool enable_app_driven;
     extern bool enable_libc_buffered;
     extern int num_threads_per_core;
+    extern bool per_level_pwc;
 }
 
 class load_per_ip_info_t
