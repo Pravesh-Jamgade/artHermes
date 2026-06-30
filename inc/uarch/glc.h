@@ -48,7 +48,7 @@
 /******************************
  * Reordering/execution stage *
  ******************************/
-#define ROB_SIZE 512
+#define ROB_SIZE 200 
 // SCHEDULER_SIZE needs a better implementation
 // ideally it should model reservation station size
 // but it is modelled in a bad way, thus setting this to ROB_SIZE
@@ -60,8 +60,8 @@
 /************************
  * Memory access stage *
  ************************/
-#define LQ_SIZE 128
-#define SQ_SIZE 72
+#define LQ_SIZE 64
+#define SQ_SIZE 36
 #define LQ_WIDTH 2
 #define SQ_WIDTH 2
 

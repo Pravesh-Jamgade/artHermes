@@ -79,7 +79,8 @@ public:
     // CPU-indexed CR3 register base addresses (100GB stride)
     uint64_t cr3_base_addrs[256];
 
-    
+    int n_mshr;
+
     // 4 levels of Page Walk Cache
     PageWalkCacheLevel level_caches[PWC_TOTAL_LEVELS];
     
@@ -101,6 +102,8 @@ public:
     // Fixed-size array ensures pointer stability (ptw_walk_ptr points here)
     struct PTW_MSHR_Entry {
         bool     valid;
+        bool     ready;          // true if memory response has resolved the entry and next walk is needed
+        uint64_t next_level_base;// next level base address retrieved from memory response
         bool     piggyback;      // true = did NOT send its own L1D request; waits for a
                                  // primary entry at the same (current_pa, current_level)
         uint64_t vaddr;
@@ -113,7 +116,7 @@ public:
         PACKET   feature_packet;    // this is sent packet for obataining next address, it has feature and went_offchip_pred populated by predictor, used for stats
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
-        PTW_MSHR_Entry() : valid(false), piggyback(false), vaddr(0), current_level(0),
+        PTW_MSHR_Entry() : valid(false), ready(false), next_level_base(0), piggyback(false), vaddr(0), current_level(0),
                            current_pte_addr(0), table_base_pa(0),
                            requested_cycle(0), instr_id(0), total_page_faults(0) {}
     };

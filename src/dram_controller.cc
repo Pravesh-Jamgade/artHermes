@@ -216,8 +216,8 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
 
                 // real allocation — let buddy allocator pick any free physical page
                 if (page_fault) {
-
-                    stall_by_page_fault[queue->entry[index].cpu] = current_core_cycle[queue->entry[index].cpu] + 100;
+                    // stall_by_page_fault[queue->entry[index].cpu] = current_core_cycle[queue->entry[index].cpu] + 100;
+                    stall_quant.push(1000);
                     PTEStatus pte_status = PTEStatus::NO_FAULT;
                     if(ddrp_req)
                     {
@@ -239,6 +239,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             }
         }
 
+        // since we have already added PF stall in front end we dont need to use this latency
         if (page_fault) {
             LATENCY += PAGE_FAULT_LATENCY;
         }
@@ -515,7 +516,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         // real allocation — let buddy allocator pick any free physical page
         if (is_pf) {
 
-            stall_by_page_fault[packet->cpu] = current_core_cycle[packet->cpu] + 100;
+            // stall_by_page_fault[packet->cpu] = current_core_cycle[packet->cpu] + 100;
+            stall_quant.push(1000);
             pte_data = buddy_allocator.access();
             PTEStatus pte_status = PTEStatus::NO_FAULT;
             if(ddrp_req)

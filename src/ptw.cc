@@ -45,6 +45,7 @@ PTWclass::PTWclass(uint32_t cpu_id)
     memset(&stats, 0, sizeof(stats));
 
     MAX_OUTSTANDING_WALKS = knob::bw_parallel_walk;
+    n_mshr = 4;
 
     // Instantiate off-chip predictor using Factory Pattern
     std::string pred_type = knob::enable_oracle_ptw_pred ? "oracle" : "perc";
@@ -67,7 +68,7 @@ void PTWclass::initialize() {
     outstanding_walks.clear();
 
     // Reset MSHR
-    for (int i = 0; i < PTW_MSHR_SIZE; i++)
+    for (int i = 0; i < n_mshr; i++)
         mshr[i] = PTW_MSHR_Entry();
 
     // Initialize per-CPU CR3 bases with 10GB spacing
@@ -272,6 +273,36 @@ bool PTWclass::is_walk_queue_available(uint64_t vaddr) {
 
 // Operate PTW (process outstanding walks)
 void PTWclass::operate() {
+    // Queue any ready MSHR entries if space is available in outstanding walks
+    for (int i = 0; i < n_mshr; i++) {
+        PTW_MSHR_Entry &me = mshr[i];
+        if (me.valid && me.ready) {
+            if (is_walk_queue_available(me.vaddr)) {
+                int next_level = me.current_level - 1;
+                OutstandingWalk nw;
+                nw.virt_full_addr  = me.vaddr;
+                nw.current_level   = next_level;
+                nw.phy_full_addr   = me.next_level_base; // table base for next level
+                nw.requested_cycle = me.requested_cycle;
+                nw.instr_id        = me.instr_id;
+                nw.packet          = me.packet;
+                nw.event_cycle = current_core_cycle[cpu] + PTW_RQ_LATENCY;
+
+                for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
+                    nw.level_stats[lv] = me.level_stats[lv];
+                nw.total_page_faults = me.total_page_faults;
+                outstanding_walks.push_back(nw);
+
+                l.log("PTWNextLevel, vaddr", hex2str(nw.virt_full_addr),"paddr", hex2str(nw.phy_full_addr), "level", next_level, "instr", nw.instr_id, "ins", +nw.packet.instruction, "current-cy", current_core_cycle[cpu], "pb", me.piggyback, '\n');
+                add_history_event(current_core_cycle[cpu], nw.instr_id, nw.virt_full_addr, nw.phy_full_addr >> LOG2_BLOCK_SIZE, nw.phy_full_addr, TRANSLATION, "PTW_NEXT_LEVEL", "PTW", false, false, false, false, 0, 0, next_level);
+
+                // Now free the MSHR entry
+                me.valid = false;
+                me.ready = false;
+            }
+        }
+    }
+
     vector<size_t> to_remove;
 
     for (size_t i = 0; i < outstanding_walks.size(); i++) {
@@ -322,8 +353,8 @@ void PTWclass::operate() {
             // outstanding walk once the primary response arrives and the PwC is filled.
             bool already_in_flight = false;
             int match_mshr_idx = -1;
-            for (int mi = 0; mi < PTW_MSHR_SIZE; mi++) {
-                if (mshr[mi].valid
+            for (int mi = 0; mi < n_mshr; mi++) {
+                if (mshr[mi].valid && !mshr[mi].ready
                     && mshr[mi].current_pte_addr >> LOG2_BLOCK_SIZE == pte_addr >> LOG2_BLOCK_SIZE
                     && mshr[mi].current_level == (int)curr_lvl) {
                     already_in_flight = true;
@@ -505,10 +536,10 @@ void PTWclass::handle_memory_response(PACKET *packet) {
         // More levels to walk: push a new OutstandingWalk for the next level.
         // Use byte-level matching (full_addr == current_pte_addr) so two PTEs in the same
         // 64-byte cache block do not both consume the same DRAM response.
-        for(int i = 0; i < PTW_MSHR_SIZE; i++) 
+        for(int i = 0; i < n_mshr; i++) 
         {
             PTW_MSHR_Entry* me = &mshr[i];
-            if (!me->valid
+            if (!me->valid || me->ready
                 || me->current_level != (int)lvl
                 || packet->address != me->current_pte_addr >> LOG2_BLOCK_SIZE)
                 continue;
@@ -534,19 +565,8 @@ void PTWclass::handle_memory_response(PACKET *packet) {
             
             // request next level walk
             if(next_level >= 0) {
-                OutstandingWalk nw;
-                nw.virt_full_addr  = me->vaddr;
-                nw.current_level   = next_level;
-                nw.phy_full_addr   = next_level_base; // table base for next level
-                nw.requested_cycle = me->requested_cycle;
-                nw.instr_id        = me->instr_id;
-                nw.packet          = me->packet;
-                for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
-                    nw.level_stats[lv] = me->level_stats[lv];
-                nw.total_page_faults = me->total_page_faults;
-                outstanding_walks.push_back(nw);
-                l.log("PTWNextLevel, vaddr", hex2str(nw.virt_full_addr),"paddr", hex2str(nw.phy_full_addr), "level", next_level, "instr", nw.instr_id, "ins", +nw.packet.instruction, "current-cy", current_core_cycle[cpu], "pb", me->piggyback, '\n');
-                add_history_event(current_core_cycle[cpu], nw.instr_id, nw.virt_full_addr, nw.phy_full_addr >> LOG2_BLOCK_SIZE, nw.phy_full_addr, TRANSLATION, "PTW_NEXT_LEVEL", "PTW", false, false, false, false, 0, 0, next_level);
+                me->ready = true;
+                me->next_level_base = next_level_base;
             }
             else {
                 // All levels done: complete the walk
@@ -557,40 +577,11 @@ void PTWclass::handle_memory_response(PACKET *packet) {
                 uint64_t latency = current_core_cycle[cpu] - me->requested_cycle;
                 stats.total_latency += latency;
                 if (latency > stats.max_latency) stats.max_latency = latency;
+
+                // free slot
+                me->valid = false;
+                me->ready = false;
             }
-
-                // // Re-queue any piggyback walks that were waiting for the same cache block at
-                // // the same level.  They were not sent to L1D directly (to avoid duplicate MSHR
-                // // merges), so now that the PwC has this block's data, re-queue them as new
-                // // OutstandingWalks.  operate() will re-compute their individual pte_addr values
-                // // and either hit the PwC (different pte but same block — unlikely) or send their
-                // // own L1D requests (which will hit the cache block and get the correct per-byte
-                // // PTE via the shadow page table).
-                // uint64_t primary_block = me->current_pte_addr >> LOG2_BLOCK_SIZE;
-                // for (int j = 0; j < PTW_MSHR_SIZE; j++) {
-                //     PTW_MSHR_Entry &pb = mshr[j];
-                //     if (&pb == me) continue;
-                //     if (!pb.valid || !pb.piggyback) continue;
-                //     if (pb.current_level != (int)lvl) continue;
-                //     if (pb.current_pte_addr >> LOG2_BLOCK_SIZE != primary_block) continue;
-
-                //     OutstandingWalk nw;
-                //     nw.virt_full_addr  = pb.vaddr;
-                //     nw.current_level   = (int)lvl;
-                //     nw.phy_full_addr   = pb.table_base_pa;
-                //     nw.requested_cycle = pb.requested_cycle;
-                //     nw.instr_id        = pb.instr_id;
-                //     nw.packet          = pb.packet;
-                //     for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
-                //         nw.level_stats[lv] = pb.level_stats[lv];
-                //     nw.total_page_faults = pb.total_page_faults;
-                //     outstanding_walks.push_back(nw);
-                //     debug.log("PiggybackRequeue, pb_vaddr", hex2str(pb.vaddr), "pb_pte", hex2str(pb.current_pte_addr), "level", lvl, "current-cy", current_core_cycle[cpu], '\n');
-                //     pb.valid = false;
-                // }
-
-                // // free primary slot
-                me->valid = false; // free MSHR slot
         }
     }
 }
@@ -621,7 +612,7 @@ void PTWclass::complete_page_walk(PACKET &pkt, uint64_t translated_pa) {
 
 // Find a free MSHR slot; returns index or -1 if all slots are occupied
 int PTWclass::find_free_mshr() {
-    for (int i = 0; i < PTW_MSHR_SIZE; i++) {
+    for (int i = 0; i < n_mshr; i++) {
         if (!mshr[i].valid)
             return i;
     }

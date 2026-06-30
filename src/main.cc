@@ -103,6 +103,7 @@ time_t start_time;
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
 queue <uint64_t > page_queue;
+queue <uint64_t > stall_quant;
 map <uint64_t, uint64_t> page_table, inverse_table, recent_page;
 vector<map<uint64_t, uint64_t>> unique_cl;
 uint64_t previous_ppage, num_adjacent_page, allocated_pages;
@@ -918,8 +919,8 @@ void finish_warmup()
     // reset core latency
     // note: since re-ordering he function calls in the main simulation loop, it's no longer necessary to add
     //       extra latency for scheduling and execution, unless you want these steps to take longer than 1 cycle.
-    SCHEDULING_LATENCY = 0;
-    EXEC_LATENCY = 0;
+    SCHEDULING_LATENCY = 2;
+    EXEC_LATENCY = 2;
     DECODE_LATENCY = 2;
     PAGE_TABLE_LATENCY = 100;
     SWAP_LATENCY = 100000;
@@ -1931,8 +1932,18 @@ int main(int argc, char** argv)
                 }
                 
                 // trying to immitate OS bubbles because of page-fault triggered OS routine spawning
-                if(stall_by_page_fault[i] <= current_core_cycle[i])
+                if(stall_by_page_fault[i] > current_core_cycle[i])
                 {
+
+                }
+                else
+                {
+                    if(stall_quant.empty() == false)
+                    {
+                        stall_by_page_fault[i] = current_core_cycle[i] + stall_quant.front();
+                        stall_quant.pop();
+                    }
+
                     // fetch
                     ooo_cpu[i].fetch_instruction();
             

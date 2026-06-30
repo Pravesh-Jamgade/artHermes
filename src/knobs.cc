@@ -423,6 +423,8 @@ namespace knob
 
 	// PTW / Shadow page-table Pravesh
 	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
+	bool ideal_stlb = false;
+	bool ideal_llc_trans_lvl0 = false;
 
 	// Trace and State machine
 	bool partial_window_trace = false;
@@ -2006,6 +2008,14 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "enable_ptw"))
 	{
 		knob::enable_ptw = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "ideal_stlb"))
+	{
+		knob::ideal_stlb = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "ideal_llc_trans_lvl0"))
+	{
+		knob::ideal_llc_trans_lvl0 = !strcmp(value, "true") ? true : false;
 	}
 	else if (MATCH("", "partial_window_trace"))
 	{

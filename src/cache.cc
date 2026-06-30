@@ -55,6 +55,8 @@ namespace knob
     extern bool     enable_ptw;
     extern bool     knob_doa_predictor;
     extern bool     enable_ddrp;
+    extern bool     ideal_stlb;
+    extern bool     ideal_llc_trans_lvl0;
     extern bool     offchip_pred_mark_merged_load;
     extern bool     enable_itlb_priority_rq;
     extern bool     enable_dtlb_priority_rq;
@@ -921,6 +923,85 @@ void CACHE::handle_read()
         {
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
+
+            if (cache_type == IS_STLB && knob::ideal_stlb)
+            {
+                uint64_t vpage = rq_entry.address;
+                uint64_t pframe = 0;
+                auto it = buddy_allocator.vpage_to_pframe.find(vpage);
+                if (it != buddy_allocator.vpage_to_pframe.end()) {
+                    pframe = it->second;
+                } else {
+                    uint64_t paddr = buddy_allocator.access();
+                    pframe = paddr >> LOG2_PAGE_SIZE;
+                    buddy_allocator.map_vpage_to_pframe(vpage, pframe);
+                }
+                
+                rq_entry.data = pframe;
+                rq_entry.hit_where = hit_where_t::STLB;
+                
+                if (rq_entry.fill_level < fill_level)
+                {
+                    if (fill_level == FILL_L2)
+                    {
+                        if (rq_entry.fill_l1i)
+                            upper_level_icache[read_cpu]->return_data(&rq_entry);
+                        if (rq_entry.fill_l1d)
+                            upper_level_dcache[read_cpu]->return_data(&rq_entry);
+                    }
+                    else
+                    {
+                        if (rq_entry.instruction)
+                            upper_level_icache[read_cpu]->return_data(&rq_entry);
+                        if (rq_entry.is_data)
+                            upper_level_dcache[read_cpu]->return_data(&rq_entry);
+                    }
+                }
+                
+                uint64_t deque_cycle = current_core_cycle[read_cpu];
+                RQ->remove_queue(&rq_entry, deque_cycle);
+                reads_available_this_cycle--;
+                continue;
+            }
+
+            if (cache_type == IS_LLC && knob::ideal_llc_trans_lvl0 && rq_entry.type == TRANSLATION && rq_entry.ptw_level == 0)
+            {
+                uint64_t shadow_val = 0;
+                bool is_pf = false;
+                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, 0, shadow_val, is_pf);
+                
+                uint64_t pte_data = 0;
+                uint64_t tagged_vpage = (rq_entry.virt_addr >> LOG2_PAGE_SIZE);
+                
+                if (!tracked || is_pf) {
+                    auto it = buddy_allocator.vpage_to_pframe.find(tagged_vpage);
+                    if (it != buddy_allocator.vpage_to_pframe.end()) {
+                        pte_data = it->second << LOG2_PAGE_SIZE;
+                    } else {
+                        pte_data = buddy_allocator.access();
+                        buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
+                    }
+                    
+                    if (!tracked) {
+                        buddy_allocator.shadow_init_page(rq_entry.full_addr >> LOG2_PAGE_SIZE, 0);
+                    }
+                    buddy_allocator.shadow_set_entry(rq_entry.full_addr, 0, pte_data, PTEStatus::NO_FAULT);
+                } else {
+                    pte_data = shadow_val;
+                }
+                
+                rq_entry.data = pte_data;
+                rq_entry.hit_where = hit_where_t::LLC;
+                
+                if (upper_level_dcache[read_cpu] != NULL) {
+                    upper_level_dcache[read_cpu]->return_data(&rq_entry);
+                }
+                
+                uint64_t deque_cycle = uncore.cycle;
+                RQ->remove_queue(&rq_entry, deque_cycle);
+                reads_available_this_cycle--;
+                continue;
+            }
 
             // cout <<NAME<< ",read,cpu,"<<read_cpu<<",addr,"<<hex2str(rq_entry.address)<<",vaddr,"<<hex2str(rq_entry.virt_addr)<<",lvl,"<<rq_entry.ptw_level<<'\n'; 
 
