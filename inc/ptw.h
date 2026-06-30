@@ -81,8 +81,8 @@ public:
 
     int n_mshr;
 
-    // 4 levels of Page Walk Cache
-    PageWalkCacheLevel level_caches[PWC_TOTAL_LEVELS];
+    // Unified Page Walk Cache (common to all levels)
+    PageWalkCacheLevel unified_pwc;
     
     // Outstanding page walk requests (pending, not yet dispatched to memory)
     struct OutstandingWalk {
@@ -219,10 +219,10 @@ public:
     
 private:
     // Helper function to update LRU
-    void update_lru(uint32_t set, uint32_t way, uint32_t level);
+    void update_lru(uint32_t set, uint32_t way);
     
     // Helper function to find victim
-    uint32_t find_victim(uint32_t set, uint32_t level);
+    uint32_t find_victim(uint32_t set);
     
 };
 

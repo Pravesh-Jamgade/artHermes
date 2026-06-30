@@ -37,10 +37,8 @@ PTWclass::PTWclass(uint32_t cpu_id)
       PTW_RQ_LATENCY(2)
 {
     // explicitly initialize array elements since they cannot be in the init list
-    level_caches[0] = PageWalkCacheLevel(PWC_L4_SETS, PWC_L4_WAYS);
-    level_caches[1] = PageWalkCacheLevel(PWC_L3_SETS, PWC_L3_WAYS);
-    level_caches[2] = PageWalkCacheLevel(PWC_L2_SETS, PWC_L2_WAYS);
-    level_caches[3] = PageWalkCacheLevel(PWC_L1_SETS, PWC_L1_WAYS);
+    // Initialize unified PwC with 1 set and 48 ways (8 + 8 + 16 + 16)
+    unified_pwc = PageWalkCacheLevel(1, PWC_L4_WAYS + PWC_L3_WAYS + PWC_L2_WAYS + PWC_L1_WAYS);
 
     memset(&stats, 0, sizeof(stats));
 
@@ -76,13 +74,11 @@ void PTWclass::initialize() {
         cr3_base_addrs[i] = (uint64_t)(i + 1) * CR3_STRIDE_10GB;
     }
     
-    // Initialize all PwC levels
-    for (uint32_t level = 0; level < PWC_TOTAL_LEVELS; level++) {
-        for (uint32_t set = 0; set < level_caches[level].sets; set++) {
-            for (uint32_t way = 0; way < level_caches[level].ways; way++) {
-                level_caches[level].entries[set][way].valid = 0;
-                level_caches[level].entries[set][way].lru = 0;
-            }
+    // Initialize unified PwC
+    for (uint32_t set = 0; set < unified_pwc.sets; set++) {
+        for (uint32_t way = 0; way < unified_pwc.ways; way++) {
+            unified_pwc.entries[set][way].valid = 0;
+            unified_pwc.entries[set][way].lru = 0;
         }
     }
 }
@@ -95,20 +91,20 @@ uint64_t PTWclass::get_level_index(uint64_t vaddr, uint32_t level) {
 
 // Get set index for a PwC level
 uint64_t PTWclass::get_level_set(uint64_t curr_pa, uint32_t level) {
-    if (level_caches[level].sets <= 1) {
+    if (unified_pwc.sets <= 1) {
         return 0;
     }
-    uint64_t set_index = (curr_pa >> 3) & ((1ULL << lg2(level_caches[level].sets)) - 1);
+    uint64_t set_index = (curr_pa >> 3) & ((1ULL << lg2(unified_pwc.sets)) - 1);
     return set_index;
 }
 
 // Extract virtual address tag for a level
 uint64_t PTWclass::get_level_tag(uint64_t curr_pa, uint32_t level) {
     uint64_t block_addr = curr_pa >> 3; // block offset is 3 bits (8 bytes)
-    if (level_caches[level].sets <= 1) {
+    if (unified_pwc.sets <= 1) {
         return block_addr;
     }
-    uint64_t set_bits = lg2(level_caches[level].sets);
+    uint64_t set_bits = lg2(unified_pwc.sets);
     return (block_addr >> set_bits);
 }
 
@@ -119,18 +115,18 @@ bool PTWclass::pwc_lookup(uint64_t curr_pa, uint32_t level, uint64_t &paddr) {
     uint64_t set = get_level_set(curr_pa, level);
     uint64_t tag = get_level_tag(curr_pa, level);
     
-    for (uint32_t way = 0; way < level_caches[level].ways; way++) {
-        PwC_Entry &entry = level_caches[level].entries[set][way];
+    for (uint32_t way = 0; way < unified_pwc.ways; way++) {
+        PwC_Entry &entry = unified_pwc.entries[set][way];
         
-        if (entry.valid && entry.tag == tag) {
+        if (entry.valid && entry.tag == tag && entry.level == level) {
             paddr = entry.paddr;
-            level_caches[level].hits++;
-            update_lru(set, way, level);
+            unified_pwc.hits++;
+            update_lru(set, way);
             return true;
         }
     }
     
-    level_caches[level].misses++;
+    unified_pwc.misses++;
     return false;
 }
 
@@ -142,20 +138,20 @@ void PTWclass::pwc_insert(uint64_t curr_addr, uint64_t paddr, uint32_t level) {
     uint64_t tag = get_level_tag(curr_addr, level);
     
     // Check if entry already exists
-    for (uint32_t way = 0; way < level_caches[level].ways; way++) {
-        PwC_Entry &entry = level_caches[level].entries[set][way];
+    for (uint32_t way = 0; way < unified_pwc.ways; way++) {
+        PwC_Entry &entry = unified_pwc.entries[set][way];
         
-        if (entry.valid && entry.tag == tag) {
+        if (entry.valid && entry.tag == tag && entry.level == level) {
             entry.paddr = paddr;
-            update_lru(set, way, level);
+            update_lru(set, way);
             return;
         }
     }
     
     // Find victim way
-    uint32_t victim_way = find_victim(set, level);
+    uint32_t victim_way = find_victim(set);
     
-    PwC_Entry &victim = level_caches[level].entries[set][victim_way];
+    PwC_Entry &victim = unified_pwc.entries[set][victim_way];
     victim.valid = 1;
     victim.vaddr = curr_addr;
     victim.paddr = paddr;
@@ -163,8 +159,8 @@ void PTWclass::pwc_insert(uint64_t curr_addr, uint64_t paddr, uint32_t level) {
     victim.level = level;
     victim.lru = 0;
     
-    level_caches[level].replacements++;
-    update_lru(set, victim_way, level);
+    unified_pwc.replacements++;
+    update_lru(set, victim_way);
 }
 
 // Invalidate PwC entry
@@ -174,10 +170,10 @@ void PTWclass::pwc_invalidate(uint64_t vaddr, uint32_t level) {
     uint32_t set = get_level_set(vaddr, level);
     uint64_t tag = get_level_tag(vaddr, level);
     
-    for (uint32_t way = 0; way < level_caches[level].ways; way++) {
-        PwC_Entry &entry = level_caches[level].entries[set][way];
+    for (uint32_t way = 0; way < unified_pwc.ways; way++) {
+        PwC_Entry &entry = unified_pwc.entries[set][way];
         
-        if (entry.valid && entry.tag == tag) {
+        if (entry.valid && entry.tag == tag && entry.level == level) {
             entry.valid = 0;
             return;
         }
@@ -186,44 +182,42 @@ void PTWclass::pwc_invalidate(uint64_t vaddr, uint32_t level) {
 
 // Flush all PwC entries
 void PTWclass::pwc_flush() {
-    for (uint32_t level = 0; level < PWC_TOTAL_LEVELS; level++) {
-        for (uint32_t set = 0; set < level_caches[level].sets; set++) {
-            for (uint32_t way = 0; way < level_caches[level].ways; way++) {
-                level_caches[level].entries[set][way].valid = 0;
-            }
+    for (uint32_t set = 0; set < unified_pwc.sets; set++) {
+        for (uint32_t way = 0; way < unified_pwc.ways; way++) {
+            unified_pwc.entries[set][way].valid = 0;
         }
     }
 }
 
 // Update LRU for a specific entry
-void PTWclass::update_lru(uint32_t set, uint32_t way, uint32_t level) {
+void PTWclass::update_lru(uint32_t set, uint32_t way) {
     // Increment all LRU counters in the set
-    for (uint32_t w = 0; w < level_caches[level].ways; w++) {
-        if (w != way && level_caches[level].entries[set][w].valid) {
-            level_caches[level].entries[set][w].lru++;
+    for (uint32_t w = 0; w < unified_pwc.ways; w++) {
+        if (w != way && unified_pwc.entries[set][w].valid) {
+            unified_pwc.entries[set][w].lru++;
         }
     }
     // Reset the accessed way's LRU counter
-    level_caches[level].entries[set][way].lru = 0;
+    unified_pwc.entries[set][way].lru = 0;
 }
 
 // Find victim way using LRU
-uint32_t PTWclass::find_victim(uint32_t set, uint32_t level) {
+uint32_t PTWclass::find_victim(uint32_t set) {
     uint32_t victim_way = 0;
     uint32_t max_lru = 0;
-    uint32_t ways = level_caches[level].ways;
+    uint32_t ways = unified_pwc.ways;
     
     // First, look for an invalid entry
     for (uint32_t way = 0; way < ways; way++) {
-        if (!level_caches[level].entries[set][way].valid) {
+        if (!unified_pwc.entries[set][way].valid) {
             return way;
         }
     }
     
     // If all valid, find the one with highest LRU count
     for (uint32_t way = 0; way < ways; way++) {
-        if (level_caches[level].entries[set][way].lru > max_lru) {
-            max_lru = level_caches[level].entries[set][way].lru;
+        if (unified_pwc.entries[set][way].lru > max_lru) {
+            max_lru = unified_pwc.entries[set][way].lru;
             victim_way = way;
         }
     }
