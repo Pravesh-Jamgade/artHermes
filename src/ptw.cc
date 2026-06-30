@@ -38,7 +38,7 @@ PTWclass::PTWclass(uint32_t cpu_id)
 {
     // explicitly initialize array elements since they cannot be in the init list
     // Initialize unified PwC with 1 set and 48 ways (8 + 8 + 16 + 16)
-    unified_pwc = PageWalkCacheLevel(1, PWC_L4_WAYS + PWC_L3_WAYS + PWC_L2_WAYS + PWC_L1_WAYS);
+    unified_pwc = PageWalkCacheLevel(8,4);
 
     // Initialize per-level PwC structures
     level_caches[0] = PageWalkCacheLevel(PWC_L4_SETS, PWC_L4_WAYS);
