@@ -10,7 +10,9 @@
 ###############################################################
 
 # configurations
-BASE = --llc_replacement_type=ship --config=$(HERMES_HOME)/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
+# MODIFIED For just one walk at a time
+BASE = --bw_parallel_walk=1 --llc_replacement_type=ship --config=$(HERMES_HOME)/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
+
 SMS = --l2c_prefetcher_types=sms --config=$(HERMES_HOME)/config/sms.ini --l2c_prefetcher_force_prefetch_at_llc=true
 SPP = --l2c_prefetcher_types=spp_ppf_dev --config=$(HERMES_HOME)/config/spp_ppf_dev.ini --ppf_perc_threshold_hi=2000
 MLOP = --l2c_prefetcher_types=mlop --config=$(HERMES_HOME)/config/mlop.ini --mlop_l2c_thresh=2.0
@@ -27,23 +29,16 @@ OCP_ORACLE = --config=$(HERMES_HOME)/config/ocp_trans.ini --ddrp_req_latency=6 -
 HERMES_O = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=6
 HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
-TRACER = --config=$(HERMES_HOME)/config/tracer.ini
-PW_4 = --bw_parallel_walk=4
-PW_8 = --bw_parallel_walk=8
-PW_8 = --bw_parallel_walk=12
+IDEAL_STLB = --ideal_stlb=true
+IDEAL_LLC = --ideal_llc_trans=true
+IDEAL_DRAM = --ideal_dram_trans=true
+IDEAL_DRAM_PAGEFAULT = --ideal_dram_and_pagefault=true
 
-#normal          $(BASE) $(TRACER)
-#ocp_oracle      $(BASE) $(OCP_ORACLE) $(TRACER)
-#ocp_trans       $(BASE) $(OCP_TRANS) $(TRACER)
+normal          $(BASE)
+ideal_stlb      $(BASE) $(IDEAL_STLB)
+ideal_llc       $(BASE) $(IDEAL_LLC)
+ideal_dram      $(BASE) $(IDEAL_DRAM)
+ideal_dram_pf   $(BASE) $(IDEAL_DRAM_PAGEFAULT)
 
-normal_4          $(BASE) $(PW_4)
-ocp_oracle_4      $(BASE) $(OCP_ORACLE) $(PW_4)
-ocp_trans_4       $(BASE) $(OCP_TRANS) $(PW_4)
-
-normal_8          $(BASE) $(PW_4)
-ocp_oracle_8      $(BASE) $(OCP_ORACLE) $(PW_4)
-ocp_trans_8       $(BASE) $(OCP_TRANS) $(PW_4)
-
-normal_12          $(BASE) $(PW_4)
-ocp_oracle_12      $(BASE) $(OCP_ORACLE) $(PW_4)
-ocp_trans_12       $(BASE) $(OCP_TRANS) $(PW_4)
+#ocp_oracle      $(BASE) $(OCP_ORACLE)
+#ocp_trans       $(BASE) $(OCP_TRANS)
