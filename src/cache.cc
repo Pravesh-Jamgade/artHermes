@@ -55,8 +55,10 @@ namespace knob
     extern bool     enable_ptw;
     extern bool     knob_doa_predictor;
     extern bool     enable_ddrp;
+
     extern bool     ideal_stlb;
-    extern bool     ideal_llc_trans_lvl0;
+    extern bool     ideal_llc_trans;
+
     extern bool     offchip_pred_mark_merged_load;
     extern bool     enable_itlb_priority_rq;
     extern bool     enable_dtlb_priority_rq;

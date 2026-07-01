@@ -19,6 +19,9 @@ namespace knob
     extern uint32_t dram_cntlr_ddrp_buffer_assoc;
     extern uint32_t dram_cntlr_ddrp_buffer_hash_type;
     extern bool     cloudsuite;
+    
+    extern bool     ideal_dram_trans;
+    extern bool     ideal_dram_and_pagefault;
 }
 
 // initialized in main.cc
@@ -239,15 +242,30 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             }
         }
 
-        // since we have already added PF stall in front end we dont need to use this latency
-        if (page_fault) {
-            LATENCY += PAGE_FAULT_LATENCY;
+        // ideal dram: pay queuing only latency, NO page-fault and row buffer hit/miss latency
+        if(knob::ideal_dram_trans)
+        {
+            LATENCY = 0;
         }
+        else
+        {
+            // ideal dram and page-fault: pay queuing + page-fault latency, NO row buffer hit/miss latency
+            if(knob::ideal_dram_and_pagefault)
+            {
+                LATENCY += PAGE_FAULT_LATENCY;
+            }
+            else
+            {
+                if (page_fault) {
+                    LATENCY += PAGE_FAULT_LATENCY;
+                }
 
-        if (row_buffer_hit)  
-            LATENCY += tCAS;
-        else 
-            LATENCY += tRP + tRCD + tCAS;
+                if (row_buffer_hit)  
+                    LATENCY += tCAS;
+                else 
+                    LATENCY += tRP + tRCD + tCAS;
+            }
+        }
 
         // model pseudo direct DRAM prefetch
         if(knob::enable_pseudo_direct_dram_prefetch && queue->entry[index].is_data)
