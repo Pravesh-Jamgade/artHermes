@@ -966,7 +966,7 @@ void CACHE::handle_read()
                 continue;
             }
 
-            if (cache_type == IS_LLC && knob::ideal_llc_trans_lvl0 && rq_entry.type == TRANSLATION && rq_entry.ptw_level == 0)
+            if (cache_type == IS_LLC && knob::ideal_llc_trans && rq_entry.type == TRANSLATION && rq_entry.ptw_level == 0)
             {
                 uint64_t shadow_val = 0;
                 bool is_pf = false;
