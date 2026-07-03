@@ -335,6 +335,12 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             stats.data_loads.load_cat[op_rob_part_type]++;
         }
 
+        add_history_event(uncore.cycle, queue->entry[index].instr_id, queue->entry[index].virt_addr, queue->entry[index].address, queue->entry[index].full_addr, queue->entry[index].type, "DRAM_SCHEDULE", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[index].hit_where);
+        if (page_fault)
+        {
+            add_history_event(uncore.cycle, queue->entry[index].instr_id, queue->entry[index].virt_addr, queue->entry[index].address, queue->entry[index].full_addr, queue->entry[index].type, "DRAM_PAGE_FAULT", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[index].hit_where);
+        }
+
         update_schedule_cycle(queue);
         update_process_cycle(queue);
 
@@ -401,6 +407,7 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
         // check if data bus is available
         if (dbus_cycle_available[op_channel] <= current_core_cycle[op_cpu]) 
         {
+            add_history_event(uncore.cycle, queue->entry[request_index].instr_id, queue->entry[request_index].virt_addr, queue->entry[request_index].address, queue->entry[request_index].full_addr, queue->entry[request_index].type, "DRAM_PROCESS", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[request_index].hit_where);
             if (queue->is_WQ) 
             {
                 // update data bus cycle time
@@ -449,7 +456,6 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                             stats.translation_waiting.wait_ddrp_finish_cycles += wait_cycles;
                         }
                     }
-
                     upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
                     stats.dram_process.returned[queue->entry[request_index].type]++;
 
@@ -508,6 +514,7 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
         else 
         { 
             // data bus is busy, the available bank cycle time is fast-forwarded for faster simulation
+            add_history_event(uncore.cycle, queue->entry[request_index].instr_id, queue->entry[request_index].virt_addr, queue->entry[request_index].address, queue->entry[request_index].full_addr, queue->entry[request_index].type, "DRAM_DBUS_CONGESTED", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[request_index].hit_where);
 
             dbus_cycle_congested[op_channel] += (dbus_cycle_available[op_channel] - current_core_cycle[op_cpu]);
             bank_request[op_channel][op_rank][op_bank].cycle_available = dbus_cycle_available[op_channel];
@@ -542,37 +549,46 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         if (packet->type == TRANSLATION || ddrp_req) {
             // check if page table has entry allocated in DRAM
             uint64_t req_pte_addr = packet->full_addr;
-            uint64_t pte_data = 0;
-            bool is_pf = false;
-            bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
 
-            // real allocation — let buddy allocator pick any free physical page
-            if (is_pf) {
-
-                // stall_by_page_fault[packet->cpu] = current_core_cycle[packet->cpu] + 100;
-                stall_quant.push(1000);
-                pte_data = buddy_allocator.access();
-                PTEStatus pte_status = PTEStatus::NO_FAULT;
-                if(ddrp_req)
-                {
-                    pte_status = PTEStatus::DDRP_PROXY;
-                }
-                // Store into shadow and clear page_fault so future cache hits return correct value.
-                buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data, pte_status);
-            }
-            
-            if(packet->ptw_level == 0)
+            auto inter_iter = buddy_allocator.intermediate_mapping.find(std::make_tuple(packet->full_addr, packet->ptw_level));
+            if(inter_iter != buddy_allocator.intermediate_mapping.end())
             {
-                uint64_t tagged_vpage = (packet->virt_addr >> LOG2_PAGE_SIZE);
-                buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
+                packet->data = inter_iter->second;
             }
+            else
+            {
+                uint64_t pte_data = 0;
+                bool is_pf = false;
+                bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
 
-            buddy_allocator.intermediate_mapping.insert({std::make_tuple(req_pte_addr, packet->ptw_level), pte_data});
+                // real allocation — let buddy allocator pick any free physical page
+                if (is_pf) {
 
-            // return pte value to cache hierarchy
-            packet->data = pte_data;
+                    // stall_by_page_fault[packet->cpu] = current_core_cycle[packet->cpu] + 100;
+                    stall_quant.push(1000);
+                    pte_data = buddy_allocator.access();
+                    PTEStatus pte_status = PTEStatus::NO_FAULT;
+                    if(ddrp_req)
+                    {
+                        pte_status = PTEStatus::DDRP_PROXY;
+                    }
+                    // Store into shadow and clear page_fault so future cache hits return correct value.
+                    buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data, pte_status);
+                }
+                
+                if(packet->ptw_level == 0)
+                {
+                    uint64_t tagged_vpage = (packet->virt_addr >> LOG2_PAGE_SIZE);
+                    buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
+                }
+
+                buddy_allocator.intermediate_mapping.insert({std::make_tuple(req_pte_addr, packet->ptw_level), pte_data});
+
+                // return pte value to cache hierarchy
+                packet->data = pte_data;
+            }    
+            
         }
-
         if (packet->instruction) 
             upper_level_icache[packet->cpu]->return_data(packet);
         if (packet->is_data)
@@ -594,6 +610,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         if (return_data_to_core) 
         {
             packet->data = WQ[channel].entry[wq_index].data;
+
             if (packet->instruction) 
                 upper_level_icache[packet->cpu]->return_data(packet);
             if (packet->is_data) 
@@ -637,6 +654,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
                 stats.translation_waiting.buffer_hit_overlap_count++;
                 stats.translation_waiting.buffer_hit_overlap_cycles += overlap_cycles;
             }
+
             // RBERA_TODO: do we want to model latency here?
             if (return_data_to_core) 
             {
