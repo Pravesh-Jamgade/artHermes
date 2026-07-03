@@ -424,8 +424,9 @@ namespace knob
 	bool enable_ptw = true;   // set false to bypass PTW and shadow lookups
 	bool ideal_stlb = false;
 	bool ideal_llc_trans = false;  
-	bool ideal_dram_trans = false;	// pay queuing latency only, NO page-fault and row buffer hit/miss latency
-	bool ideal_dram_and_pagefault = false; // pay queuing + page fault latency, NO row buffer hit/miss latency
+	bool ideal_dram_queue_latency_only = false;	// pay queuing latency only, NO page-fault and row buffer hit/miss latency
+	bool ideal_dram_row_buffer_latency_only = false; // pay queuing + page fault latency, NO row buffer hit/miss latency
+	bool ideal_dram_page_fault_latency_only = false; // pay queuing + row buffer hit/miss latency, NO page fault latency
 	bool per_level_pwc = false;
 
 	// Trace and State machine
@@ -2020,13 +2021,17 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	{
 		knob::ideal_llc_trans = !strcmp(value, "true") ? true : false;
 	}
-	else if (MATCH("", "ideal_dram_trans"))
+	else if (MATCH("", "ideal_dram_queue_latency_only"))
 	{
-		knob::ideal_dram_trans = !strcmp(value, "true") ? true : false;
+		knob::ideal_dram_queue_latency_only = !strcmp(value, "true") ? true : false;
 	}
-	else if (MATCH("", "ideal_dram_and_pagefault"))
+	else if (MATCH("", "ideal_dram_row_buffer_latency_only"))
 	{
-		knob::ideal_dram_and_pagefault = !strcmp(value, "true") ? true : false;
+		knob::ideal_dram_row_buffer_latency_only = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "ideal_dram_page_fault_latency_only"))
+	{
+		knob::ideal_dram_page_fault_latency_only = !strcmp(value, "true") ? true : false;
 	}
 
 	else if (MATCH("", "per_level_pwc"))
