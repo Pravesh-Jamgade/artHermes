@@ -4,6 +4,7 @@
 
 #include "memory_class.h"
 #include "buddy_allocator.h"
+#include "hist.h"
 
 extern uint32_t DRAM_MTPS, DRAM_DBUS_RETURN_TIME, DRAM_DBUS_MAX_CAS;
 
@@ -51,6 +52,8 @@ class MEMORY_CONTROLLER : public MEMORY {
     uint8_t bw;
     uint64_t total_bw_epochs;
     uint64_t bw_level_hist[DRAM_BW_LEVELS];
+
+    map<tuple<uint64_t, int>, uint64_t> fullAddrLevel_ptemap;
 
     struct
     {
@@ -123,6 +126,8 @@ class MEMORY_CONTROLLER : public MEMORY {
         } translation_waiting;
         
     } stats;
+
+    LatencyHistogram service_time_hist;
 
     // constructor
     MEMORY_CONTROLLER(string v1) : NAME (v1) {

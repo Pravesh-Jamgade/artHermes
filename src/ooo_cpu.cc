@@ -2512,6 +2512,11 @@ void O3_CPU::retire_rob()
             }
         }
 
+        // Update ROB lifetime histogram
+        if (ROB.entry[ROB.head].dispatch_cycle != UINT64_MAX && current_core_cycle[cpu] >= ROB.entry[ROB.head].dispatch_cycle) {
+            rob_lifetime_hist.update(current_core_cycle[cpu] - ROB.entry[ROB.head].dispatch_cycle);
+        }
+
         // release ROB entry
         DP ( if (warmup_complete[cpu]) {
         cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[ROB.head].instr_id << " is retired" << endl; });

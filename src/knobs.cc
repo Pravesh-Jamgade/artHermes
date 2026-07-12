@@ -428,6 +428,7 @@ namespace knob
 	bool ideal_dram_row_buffer_latency_only = false; // pay queuing + page fault latency, NO row buffer hit/miss latency
 	bool ideal_dram_page_fault_latency_only = false; // pay queuing + row buffer hit/miss latency, NO page fault latency
 	bool per_level_pwc = false;
+	bool disable_l1_translation_install = false;
 
 	// Trace and State machine
 	bool partial_window_trace = false;
@@ -2037,6 +2038,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if (MATCH("", "per_level_pwc"))
 	{
 		knob::per_level_pwc = !strcmp(value, "true") ? true : false;
+	}
+	else if (MATCH("", "disable_l1_translation_install"))
+	{
+		knob::disable_l1_translation_install = !strcmp(value, "true") ? true : false;
 	}
 	else if (MATCH("", "partial_window_trace"))
 	{

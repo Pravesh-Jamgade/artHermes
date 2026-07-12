@@ -216,6 +216,7 @@ public:
     LatencyHistogram load_to_translation_hist; // histogram of load-to-translation latency for loads that went offchip
     LatencyHistogram rob_load_waiting_translation_blocked_hist; // histogram of ROB blocking latency due to translation
     LatencyHistogram rob_load_waiting_data_blocked_hist; // histogram of ROB blocking latency due to data access
+    LatencyHistogram rob_lifetime_hist; // histogram of ROB instruction lifetime from dispatch to retirement
 
     // bubble stats per ROB partiton
     vector<uint64_t> bubble_max, bubble_min, bubble_tot, bubble_cnt;
@@ -349,6 +350,7 @@ public:
         load_to_translation_hist = LatencyHistogram();
         rob_load_waiting_translation_blocked_hist = LatencyHistogram();
         rob_load_waiting_data_blocked_hist = LatencyHistogram();
+        rob_lifetime_hist = LatencyHistogram();
         for(uint32_t index = 0; index < knob::num_rob_partitions; ++index)
         {
             bubble_max[index] = 0;

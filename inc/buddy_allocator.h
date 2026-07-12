@@ -40,7 +40,9 @@ enum PTEStatus{
 struct ShadowPTEntry {
     uint64_t value;       // physical address / PTE value
     PTEStatus page_fault;  // true until the PTW officially walks this entry
-    ShadowPTEntry() : value(0), page_fault(PTEStatus::FAULT) {}
+    bool access;    // first time accessed entry ?
+    bool consume_pf_cost;
+    ShadowPTEntry() : value(0), access(true), page_fault(PTEStatus::FAULT), consume_pf_cost(0) {}
 };
 
 struct ShadowPTBlock {
@@ -102,13 +104,16 @@ struct BuddyAllocator {
     // ---------------------------------------------------------------------------
     void shadow_init_page(uint64_t page_key, uint8_t level);
     void shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_t value, PTEStatus pte_status = PTEStatus::NO_FAULT);
-    // Returns true if the page is tracked; also sets 'value' and 'is_page_fault'.
-    bool shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault) const;
-    // Convenience overload — ignores page_fault flag (backward compat).
+    bool shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault, bool& is_first_access) const;
     bool shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value) const;
-    // Clear the page_fault flag for a specific PTE.
-    void shadow_clear_page_fault(uint64_t pte_paddr, uint8_t level);
+    // Todo: when page is evicted we should be reseting entrys bits: accessm, consume_pf, etc
+    // right now buddyalloc only stores pa->va mapping, but we lack level information with 
+    // (and in worst case we might need to keep cpu/thread information with it)
+    // using pa+level we can get and reset shadow entry.
+    // it is possible to iterate and search levels as well using just pa (as pa in the end is just the unique number 4KB apart)
+    void shadow_clear_evicted_page(uint64_t pte_paddr);
     std::string debug_print_valid_block_entry(uint64_t pte_paddr, uint8_t level);
+    bool shadow_apply_pf_cost(uint64_t pte_paddr, uint8_t level);
 
 private:
     uint64_t alloc_any(); // allocate any available order-0 page from the buddy free lists

@@ -83,7 +83,6 @@ void print_history() {
     std::cout << "\n================ PACKET HISTORY EVENT DUMP (PAST EVENTS) ================\n";
     std::cout << std::left 
               << std::setw(6)  << "Idx"
-              << std::setw(3)  << "cpu"
               << std::setw(12) << "Cycle"
               << std::setw(12) << "Instr ID"
               << std::setw(16) << "Virt Addr"

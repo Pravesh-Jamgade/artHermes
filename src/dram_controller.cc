@@ -204,69 +204,57 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         // Derive it from the PTE's byte address: the page that contains this PTE is
         // allocated by the buddy allocator, so use its physical frame address.
         uint64_t LATENCY = 0;
-        bool page_fault = false;
+        bool is_pf=false;
         // For a translation request, we need to check if the page table entry being accessed has a valid 
         // physical page allocated in DRAM. If not, we need to allocate a physical page (which may involve 
         // evicting another page) before we can return the translation result. This models the latency of 
         // handling a page fault for a translation request.
         {
             bool ddrp_req = (queue->entry[index].type == PREFETCH && queue->entry[index].fill_level==FILL_DDRP);
-            if (queue->entry[index].type == TRANSLATION || ddrp_req)
+            if (queue->entry[index].type == TRANSLATION ||  ddrp_req)
             {
-                // check if page table has entry allocated in DRAM
-                uint64_t req_pte_addr = queue->entry[index].full_addr;
-                uint64_t pte_data = 0;
-                bool shd_entry_found = buddy_allocator.shadow_get_entry(req_pte_addr, queue->entry[index].ptw_level, pte_data, page_fault);
-
-                // real allocation — let buddy allocator pick any free physical page
-                if (page_fault) {
-                    // stall_by_page_fault[queue->entry[index].cpu] = current_core_cycle[queue->entry[index].cpu] + 100;
-                    // stall_quant.push(1000);
-                    PTEStatus pte_status = PTEStatus::NO_FAULT;
-                    if(ddrp_req)
-                    {
-                        pte_status = PTEStatus::DDRP_PROXY;
-                    }
-                    pte_data = buddy_allocator.access();
-                    // Store into shadow and clear page_fault so future cache hits return correct value.
-                    buddy_allocator.shadow_set_entry(req_pte_addr, 
-                                        (uint8_t)queue->entry[index].ptw_level, pte_data, pte_status);
-                }
-
-                if(queue->entry[index].ptw_level == 0)
-                {
-                    uint64_t tagged_vpage = (queue->entry[index].virt_addr >> LOG2_PAGE_SIZE);
-                    buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
-                }
-                
-                buddy_allocator.intermediate_mapping.insert({std::make_tuple(req_pte_addr, queue->entry[index].ptw_level), pte_data});
-
-                queue->entry[index].data = pte_data;
+               is_pf = buddy_allocator.shadow_apply_pf_cost(queue->entry[index].full_addr, queue->entry[index].ptw_level);
             }
         }
 
         LATENCY = 0; 
         
-        if(knob::ideal_dram_queue_latency_only)
+        if(queue->entry[index].from_ptw)
         {
-            LATENCY = 0;
-        }
-        else if(knob::ideal_dram_row_buffer_latency_only)
-        {
-            LATENCY = row_buffer_hit ? tCAS : (tRP + tRCD + tCAS);
-            
-        }
-        else if(knob::ideal_dram_page_fault_latency_only)
-        {
-            if(page_fault)
+            if(knob::ideal_dram_queue_latency_only)
             {
-                stall_quant.push(1000);
-                LATENCY = PAGE_FAULT_LATENCY;
+                LATENCY = 0;
+            }
+            else if(knob::ideal_dram_row_buffer_latency_only)
+            {
+                LATENCY = row_buffer_hit ? tCAS : (tRP + tRCD + tCAS);
+                
+            }
+            else if(knob::ideal_dram_page_fault_latency_only)
+            {
+                if(is_pf)
+                {
+                    stall_quant.push(1000);
+                    LATENCY = PAGE_FAULT_LATENCY;
+                }
+            }
+            else
+            {
+                if (is_pf) 
+                {
+                    stall_quant.push(1000);
+                    LATENCY += PAGE_FAULT_LATENCY;   
+                }
+                        
+                if (row_buffer_hit)  
+                    LATENCY += tCAS;
+                else 
+                    LATENCY += tRP + tRCD + tCAS;
             }
         }
         else
         {
-            if (page_fault) 
+            if (is_pf) 
             {
                 stall_quant.push(1000);
                 LATENCY += PAGE_FAULT_LATENCY;   
@@ -336,7 +324,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         }
 
         add_history_event(uncore.cycle, queue->entry[index].instr_id, queue->entry[index].virt_addr, queue->entry[index].address, queue->entry[index].full_addr, queue->entry[index].type, "DRAM_SCHEDULE", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[index].hit_where);
-        if (page_fault)
+        if (is_pf)
         {
             add_history_event(uncore.cycle, queue->entry[index].instr_id, queue->entry[index].virt_addr, queue->entry[index].address, queue->entry[index].full_addr, queue->entry[index].type, "DRAM_PAGE_FAULT", queue->NAME.c_str(), false, false, false, false, 0, queue->entry[index].hit_where);
         }
@@ -456,6 +444,41 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                             stats.translation_waiting.wait_ddrp_finish_cycles += wait_cycles;
                         }
                     }
+                    
+                    uint64_t return_pte_data = 0;
+                    bool is_pf=false, is_fa=false;
+                    bool assert_stop = true;
+                    buddy_allocator.shadow_get_entry(queue->entry[request_index].full_addr, queue->entry[request_index].ptw_level, return_pte_data, is_pf, is_fa);
+                    if(return_pte_data != queue->entry[request_index].data)
+                    {
+                        assert_stop=false;
+                        cout << "ERROR: shadowPT @" << __func__ << " instr_id: " << queue->entry[request_index].instr_id << " address: " << hex << queue->entry[request_index].address;
+                        cout << " full_addr: " << queue->entry[request_index].full_addr << dec << " ptw_level: " << +queue->entry[request_index].ptw_level;
+                        cout << " mapped_pframe: " << hex << return_pte_data << dec;
+                        cout << " pte_data: " << hex << queue->entry[request_index].data << dec;
+                    }
+                    
+                    auto it_mapped = fullAddrLevel_ptemap.find({queue->entry[request_index].full_addr, queue->entry[request_index].ptw_level});
+                    if(it_mapped != fullAddrLevel_ptemap.end() && it_mapped->second != queue->entry[request_index].data)
+                    {
+                        assert_stop=false;
+                        cout << "ERROR: fullMap @" << __func__ << " instr_id: " << queue->entry[request_index].instr_id << " address: " << hex << queue->entry[request_index].address;
+                        cout << " full_addr: " << queue->entry[request_index].full_addr << dec << " ptw_level: " << +queue->entry[request_index].ptw_level;
+                        cout << " mapped_pframe: " << hex << it_mapped->second << dec;
+                        cout << " pte_data: " << hex << queue->entry[request_index].data << dec;
+                    }
+
+                    if(assert_stop == false)
+                    {
+                        bool inMap = it_mapped != fullAddrLevel_ptemap.end();
+                        cout << "addr, " << hex << queue->entry[request_index].address << ", full_addr, " << queue->entry[request_index].full_addr << dec << '\n';
+                        if(inMap) cout << "map entry, " << inMap <<" pte_data, " <<hex<< it_mapped->second<<dec<< '\n';
+                        else cout << "map entry, " << inMap << '\n';
+                        cout << "shadowPT, " <<hex<< return_pte_data << ", pte_data, " << queue->entry[request_index].data <<dec<< '\n';
+                    }
+
+                    assert(assert_stop);
+
                     upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
                     stats.dram_process.returned[queue->entry[request_index].type]++;
 
@@ -508,6 +531,12 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
             // cout << " timestamp: " << uncore.cycle;
             // cout << " entry_enq_timestamp: " << queue->entry[request_index].enque_cycle[queue->module_type][queue->queue_type];
             // cout << " entry_deq_timestamp: " << queue->entry[request_index].deque_cycle[queue->module_type][queue->queue_type] << endl;
+            if (!queue->is_WQ) {
+                uint64_t enq = queue->entry[request_index].enque_cycle[IS_DRAM][IS_RQ];
+                if (uncore.cycle >= enq) {
+                    service_time_hist.update(uncore.cycle - enq);
+                }
+            }
             queue->remove_queue(&queue->entry[request_index], uncore.cycle);
             update_process_cycle(queue);
         }
@@ -540,55 +569,41 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
     {
         return_data_to_core = false;
     }
+    // here we will fill all of trans packets with pte_data, but wont set fault status that will be set by schedule 
+    // hence warmup packets wont effect take pagefault latency 
+    bool ddrp_req = (packet->type == PREFETCH && packet->fill_level==FILL_DDRP);
+    if (packet->type == TRANSLATION || ddrp_req) {
+        uint64_t page_key = packet->full_addr >> LOG2_PAGE_SIZE;
+        uint64_t pte_data = 0;
+        bool is_pf=false, is_fa=false, due_cost=false;
+        PTEStatus pte_status = PTEStatus::NO_FAULT;
+
+        // DDRP -> pf=T,fa=T -> allocate -> DDRP_PROXY -> Regular -> pf=T,fa=F,due_cost=T -> CONSUME_LATENCY 
+        // Regular and DDRP can lead to page fault
+        buddy_allocator.shadow_get_entry(packet->full_addr, packet->ptw_level, pte_data, is_pf, is_fa);
+        
+        // allocate only if page is accessed fist time and hence its pf is true
+        if(is_fa && is_pf){
+            pte_data = buddy_allocator.access();
+            fullAddrLevel_ptemap.insert({{packet->full_addr, packet->ptw_level}, pte_data});
+        }
+
+        // pf are two type PROXY for DDRP and PAGE_FAULT for normal page fault, hence we need to set the status of pte in shadowPT
+        if(is_pf){
+            if(ddrp_req){
+                pte_status = PTEStatus::DDRP_PROXY;
+            }
+            // set first_access=0, set pte_status=ddrp_proxy OR no_fault, set consume_pf=1
+            buddy_allocator.shadow_set_entry(packet->full_addr, packet->ptw_level, pte_data, pte_status);
+        }
+        
+        packet->data = pte_data;
+    }
 
     // for warmup, we return without going to DRAM
     // Hence we are assuming pf is handled here since packet will go return we need to do this here
     if (all_warmup_complete < NUM_CPUS && return_data_to_core) 
     {  
-        bool ddrp_req = (packet->type == PREFETCH && packet->fill_level==FILL_DDRP);
-        if (packet->type == TRANSLATION || ddrp_req) {
-            // check if page table has entry allocated in DRAM
-            uint64_t req_pte_addr = packet->full_addr;
-
-            auto inter_iter = buddy_allocator.intermediate_mapping.find(std::make_tuple(packet->full_addr, packet->ptw_level));
-            if(inter_iter != buddy_allocator.intermediate_mapping.end())
-            {
-                packet->data = inter_iter->second;
-            }
-            else
-            {
-                uint64_t pte_data = 0;
-                bool is_pf = false;
-                bool found_pte = buddy_allocator.shadow_get_entry(req_pte_addr, packet->ptw_level, pte_data, is_pf);
-
-                // real allocation — let buddy allocator pick any free physical page
-                if (is_pf) {
-
-                    // stall_by_page_fault[packet->cpu] = current_core_cycle[packet->cpu] + 100;
-                    stall_quant.push(1000);
-                    pte_data = buddy_allocator.access();
-                    PTEStatus pte_status = PTEStatus::NO_FAULT;
-                    if(ddrp_req)
-                    {
-                        pte_status = PTEStatus::DDRP_PROXY;
-                    }
-                    // Store into shadow and clear page_fault so future cache hits return correct value.
-                    buddy_allocator.shadow_set_entry(req_pte_addr, (uint8_t)packet->ptw_level, pte_data, pte_status);
-                }
-                
-                if(packet->ptw_level == 0)
-                {
-                    uint64_t tagged_vpage = (packet->virt_addr >> LOG2_PAGE_SIZE);
-                    buddy_allocator.map_vpage_to_pframe(tagged_vpage, pte_data >> LOG2_PAGE_SIZE);
-                }
-
-                buddy_allocator.intermediate_mapping.insert({std::make_tuple(req_pte_addr, packet->ptw_level), pte_data});
-
-                // return pte value to cache hierarchy
-                packet->data = pte_data;
-            }    
-            
-        }
         if (packet->instruction) 
             upper_level_icache[packet->cpu]->return_data(packet);
         if (packet->is_data)
@@ -624,6 +639,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         ACCESS[1]++;
         HIT[1]++;
 
+        service_time_hist.update(0);
+
         WQ[channel].FORWARD++;
         RQ[channel].ACCESS++;
 
@@ -643,10 +660,16 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         {
             if (packet->type == TRANSLATION) 
             {
-                auto inter_iter = buddy_allocator.intermediate_mapping.find(std::make_tuple(packet->full_addr, packet->ptw_level));
-                if(inter_iter != buddy_allocator.intermediate_mapping.end())
+                auto it_mapped = fullAddrLevel_ptemap.find({packet->address, packet->ptw_level});
+                buddy_allocator.shadow_get_entry(packet->full_addr, packet->ptw_level, packet->data);
+
+                if(it_mapped->second != packet->data)
                 {
-                    packet->data = inter_iter->second;
+                    cout << "ERROR: @LKPDDRP" << __func__ << " instr_id: " << packet->instr_id << " address: " << hex << packet->address;
+                    cout << " full_addr: " << packet->full_addr << dec << " ptw_level: " << +packet->ptw_level;
+                    cout << " mapped_pframe: " << hex << it_mapped->second << dec;
+                    cout << " pte_data: " << hex << packet->data << dec;
+                    assert(false);
                 }
 
                 uint64_t q3 = uncore.cycle;
@@ -670,6 +693,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
             DDRP_DP ( if(warmup_complete[packet->cpu]) {
             cout << "[" << NAME << "_RQ] " <<  __func__ << " instr_id: " << packet->instr_id << " address: " << hex << packet->address;
             cout << " full_addr: " << packet->full_addr << dec << " DDRP_BUFFER_FORWARD"; });
+
+            service_time_hist.update(0);
 
             if(packet->fill_level <= FILL_LLC)
             {

@@ -7,6 +7,7 @@
 #include "champsim.h"
 #include "defs.h"
 #include "offchip_pred_base.h"
+#include "hist.h"
 
 // Page Walk Cache (PwC) configuration for 4 levels
 // Fully associative (single set) per level; total entries preserved.
@@ -117,9 +118,10 @@ public:
         PACKET   feature_packet;    // this is sent packet for obataining next address, it has feature and went_offchip_pred populated by predictor, used for stats
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
+        uint64_t level_request_cycle;
         PTW_MSHR_Entry() : valid(false), ready(false), next_level_base(0), piggyback(false), vaddr(0), current_level(0),
                            current_pte_addr(0), table_base_pa(0),
-                           requested_cycle(0), instr_id(0), total_page_faults(0) {}
+                           requested_cycle(0), instr_id(0), total_page_faults(0), level_request_cycle(0) {}
     };
 
     std::deque<OutstandingWalk> outstanding_walks;
@@ -163,6 +165,8 @@ public:
         
         uint64_t total_page_faults;
     } stats;
+
+    LatencyHistogram level_service_time_hist[PWC_TOTAL_LEVELS];
     
     // PTW configuration
     uint32_t PTW_LATENCY,PTW_RQ_LATENCY;

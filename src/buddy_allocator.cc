@@ -72,12 +72,33 @@ void BuddyAllocator::free_page(uint64_t page_num)
         if (buddy < total_pages && free_lists[order].count(buddy)) {
             free_lists[order].erase(buddy);
             block = std::min(block, buddy); // merged block starts at lower address
+            shadow_clear_evicted_page(page_num);
             order++;
         } else {
             break;
         }
     }
     free_lists[order].insert(block);
+}
+
+void BuddyAllocator::shadow_clear_evicted_page(uint64_t pa)
+{
+    uint64_t page_key;
+    uint32_t block_idx, entry_idx;
+    pte_addr_decompose(pa, page_key, block_idx, entry_idx);
+
+    for(int i=0; i< NUM_SHADOW_PT_LEVELS; i++)
+    {
+        auto it = shadow_pt[i].find(page_key);
+        if(it != shadow_pt[i].end())
+        {
+            ShadowPTBlock& shd_blocks = it->second.blocks[block_idx];
+            for(int j=0; j< SHADOW_ENTRIES_PER_BLOCK; j++){
+                shd_blocks.entries[j].value = shd_blocks.entries[j].access = shd_blocks.entries[j].consume_pf_cost = 0;
+                shd_blocks.entries[j].page_fault = PTEStatus::FAULT;
+            }
+        }
+    }
 }
 
 // Allocate any free physical page from the buddy free lists.
@@ -154,11 +175,17 @@ void BuddyAllocator::shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_
     if (it != shadow_pt[level].end()) {
         it->second.blocks[block_idx].entries[entry_idx].value      = value;
         it->second.blocks[block_idx].entries[entry_idx].page_fault = pte_status; // explicit set = officially known
-        
-        std::string status_pf_entries = "";
-        for(auto entry: it->second.blocks[block_idx].entries){
-            status_pf_entries += std::to_string(entry.page_fault)+"_";
+
+        if(it->second.blocks[block_idx].entries[entry_idx].access)
+        {
+            it->second.blocks[block_idx].entries[entry_idx].consume_pf_cost = 1;
         }
+        it->second.blocks[block_idx].entries[entry_idx].access = false; // first access done
+        
+        // std::string status_pf_entries = "";
+        // for(auto entry: it->second.blocks[block_idx].entries){
+        //     status_pf_entries += std::to_string(entry.page_fault)+"_";
+        // }
     }
     // If the page hasn't been initialised yet we silently drop the write;
     // shadow_init_page must be called first (done in ptw.cc operate()).
@@ -166,7 +193,7 @@ void BuddyAllocator::shadow_set_entry(uint64_t pte_paddr, uint8_t level, uint64_
 
 // Read the shadow entry for the PTE at exact byte address pte_paddr.
 // Returns true (found pte) and sets 'value' and 'is_page_fault' if the page is tracked.
-bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault) const
+bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value, bool &is_page_fault, bool &first_access) const
 {
     uint64_t page_key;
     uint32_t block_idx, entry_idx;
@@ -179,28 +206,34 @@ bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_
     const ShadowPTEntry &e = it->second.blocks[block_idx].entries[entry_idx];
     value        = e.value;
     is_page_fault = e.page_fault == PTEStatus::FAULT || e.page_fault == PTEStatus::DDRP_PROXY;
-
+    first_access = e.access;
     return true;
 }
 
 // Convenience overload — page_fault flag is ignored by the caller.
 bool BuddyAllocator::shadow_get_entry(uint64_t pte_paddr, uint8_t level, uint64_t &value) const
 {
-    bool pf;
-    return shadow_get_entry(pte_paddr, level, value, pf);
+    bool pf, fa;
+    return shadow_get_entry(pte_paddr, level, value, pf, fa);
 }
 
-// Clear the page_fault flag for a PTE.
-void BuddyAllocator::shadow_clear_page_fault(uint64_t pte_paddr, uint8_t level)
+// Convenience overload — page_fault flag is ignored by the caller.
+bool BuddyAllocator::shadow_apply_pf_cost(uint64_t pte_paddr, uint8_t level)
 {
     uint64_t page_key;
     uint32_t block_idx, entry_idx;
     pte_addr_decompose(pte_paddr, page_key, block_idx, entry_idx);
 
     auto it = shadow_pt[level].find(page_key);
-    if (it != shadow_pt[level].end())
-        it->second.blocks[block_idx].entries[entry_idx].page_fault = PTEStatus::NO_FAULT;
+    if (it == shadow_pt[level].end())
+        return false;
+
+    ShadowPTEntry &e = it->second.blocks[block_idx].entries[entry_idx];
+    bool t = e.consume_pf_cost;
+    e.consume_pf_cost = false;
+    return t;
 }
+
 
 std::string BuddyAllocator::debug_print_valid_block_entry(uint64_t pte_paddr, uint8_t level)
 {

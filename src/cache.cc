@@ -53,6 +53,7 @@ namespace knob
     extern bool     l2c_pseudo_perfect_enable_frontal;
     extern bool     l2c_pseudo_perfect_enable_dorsal;
     extern bool     enable_ptw;
+    extern bool     disable_l1_translation_install;
     extern bool     knob_doa_predictor;
     extern bool     enable_ddrp;
 
@@ -222,6 +223,40 @@ void CACHE::handle_fill()
 #endif
 
         uint32_t mshr_index = MSHR.next_fill_index;
+
+        // If knob::disable_l1_translation_install is true, do not insert TRANSLATION blocks into L1 caches (L1D or L1I)
+        if (knob::disable_l1_translation_install && (cache_type == IS_L1D || cache_type == IS_L1I) && (MSHR.entry[mshr_index].type == TRANSLATION))
+        {
+            // Trigger history event
+            add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].virt_addr, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL_BYPASS_TRANS", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
+
+            // send response to upper level cache (usually translation packets are not forwarded to core data cache,
+            // but we must notify the Page Table Walker if it originated from PTW)
+            if (cache_type == IS_L1D) 
+            {
+                if (ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker != NULL) {
+                    ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker->handle_memory_response(&MSHR.entry[mshr_index]);
+                }
+            }
+
+            // update miss latency stats
+            if (warmup_complete[fill_cpu] && (MSHR.entry[mshr_index].cycle_enqueued != 0))
+            {
+                uint64_t current_miss_latency = (current_core_cycle[fill_cpu] - MSHR.entry[mshr_index].cycle_enqueued);
+                total_miss_latency += current_miss_latency;
+            }
+
+            uint64_t deque_cycle = current_core_cycle[fill_cpu];
+            if (deque_cycle >= MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]) {
+                service_time_hist.update(deque_cycle - MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]);
+            }
+            MSHR.remove_queue(&MSHR.entry[mshr_index]);
+            MSHR.num_returned--;
+
+            update_fill_cycle();
+
+            return;
+        }
 
         // find victim
         uint32_t set = get_set(MSHR.entry[mshr_index].address), way;
@@ -512,6 +547,10 @@ void CACHE::handle_fill()
                 total_miss_latency += current_miss_latency;
             }
       
+            uint64_t deque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[fill_cpu];
+            if (deque_cycle >= MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]) {
+                service_time_hist.update(deque_cycle - MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]);
+            }
             MSHR.remove_queue(&MSHR.entry[mshr_index]);
             MSHR.num_returned--;
 
@@ -928,7 +967,7 @@ void CACHE::handle_read()
 
             if (cache_type == IS_STLB && knob::ideal_stlb)
             {
-                uint64_t vpage = rq_entry.address;
+                uint64_t vpage = rq_entry.full_addr >> LOG2_PAGE_SIZE;
                 uint64_t pframe = 0;
                 auto it = buddy_allocator.vpage_to_pframe.find(vpage);
                 if (it != buddy_allocator.vpage_to_pframe.end()) {
@@ -961,6 +1000,9 @@ void CACHE::handle_read()
                 }
                 
                 uint64_t deque_cycle = current_core_cycle[read_cpu];
+                if (deque_cycle >= rq_entry.enque_cycle[cache_type][IS_RQ]) {
+                    service_time_hist.update(deque_cycle - rq_entry.enque_cycle[cache_type][IS_RQ]);
+                }
                 RQ->remove_queue(&rq_entry, deque_cycle);
                 reads_available_this_cycle--;
                 continue;
@@ -969,8 +1011,8 @@ void CACHE::handle_read()
             if (cache_type == IS_LLC && knob::ideal_llc_trans && rq_entry.type == TRANSLATION && rq_entry.ptw_level == 0)
             {
                 uint64_t shadow_val = 0;
-                bool is_pf = false;
-                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, 0, shadow_val, is_pf);
+                bool is_pf=false, is_fa=false;
+                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, 0, shadow_val, is_pf, is_fa);
                 
                 uint64_t pte_data = 0;
                 uint64_t tagged_vpage = (rq_entry.virt_addr >> LOG2_PAGE_SIZE);
@@ -1000,6 +1042,9 @@ void CACHE::handle_read()
                 }
                 
                 uint64_t deque_cycle = uncore.cycle;
+                if (deque_cycle >= rq_entry.enque_cycle[cache_type][IS_RQ]) {
+                    service_time_hist.update(deque_cycle - rq_entry.enque_cycle[cache_type][IS_RQ]);
+                }
                 RQ->remove_queue(&rq_entry, deque_cycle);
                 reads_available_this_cycle--;
                 continue;
@@ -1017,8 +1062,8 @@ void CACHE::handle_read()
             if (knob::enable_ptw && rq_entry.type == TRANSLATION && rq_entry.from_ptw && way >= 0)
             {
                 uint64_t shadow_val;
-                bool is_pf = false;
-                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, (uint8_t)rq_entry.ptw_level, shadow_val, is_pf);
+                bool is_pf=false, is_fa=false;
+                bool tracked = buddy_allocator.shadow_get_entry(rq_entry.full_addr, (uint8_t)rq_entry.ptw_level, shadow_val, is_pf, is_fa);
 
                 if (is_pf) {
                     // // Entry was initialised but never officially walked by PTW yet.
@@ -1199,6 +1244,9 @@ void CACHE::handle_read()
                 
                 // remove this entry from RQ
                 uint64_t deque_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[read_cpu];
+                if (deque_cycle >= rq_entry.enque_cycle[cache_type][IS_RQ]) {
+                    service_time_hist.update(deque_cycle - rq_entry.enque_cycle[cache_type][IS_RQ]);
+                }
                 RQ->remove_queue(&rq_entry, deque_cycle);
 		        reads_available_this_cycle--;
             }
@@ -1952,8 +2000,8 @@ bool CACHE::free_lookup(PACKET *packet)
     // Apply shadow page table page fault override (similar to handle_read)
     if (hit && knob::enable_ptw && packet->type == TRANSLATION && packet->from_ptw) {
         uint64_t shadow_val;
-        bool is_pf = false;
-        if (buddy_allocator.shadow_get_entry(packet->full_addr, (uint8_t)packet->ptw_level, shadow_val, is_pf) && is_pf) {
+        bool is_pf = false, is_fa;
+        if (buddy_allocator.shadow_get_entry(packet->full_addr, (uint8_t)packet->ptw_level, shadow_val, is_pf, is_fa) && is_pf) {
             hit = false; // forced miss due to page fault
         }
     }
@@ -2092,6 +2140,8 @@ int CACHE::add_rq(PACKET *packet)
 
         HIT[packet->type]++;
         ACCESS[packet->type]++;
+
+        service_time_hist.update(0);
 
         WQ.FORWARD++;
         RQ->ACCESS++;
@@ -2526,6 +2576,7 @@ void CACHE::return_data(PACKET *packet)
         cerr << " full_addr: " << hex << packet->full_addr;
         cerr << " address: " << packet->address << dec;
         cerr << " event: " << packet->event_cycle << " current: " << current_core_cycle[packet->cpu] << endl;
+        
         assert(0 && "MSHR entry not found for returning packet");
     }
 
@@ -2549,7 +2600,9 @@ void CACHE::return_data(PACKET *packet)
 
     update_fill_cycle();
 
-    // cout <<NAME<< ",return,cpu,"<<packet->cpu<<",addr,"<<hex2str(packet->address)<<",vaddr,"<<hex2str(packet->virt_addr)<<",lvl,"<<packet->ptw_level<<'\n'; 
+    // if(packet->type == TRANSLATION){
+    //     cout <<NAME<< ",return,cpu,"<<packet->cpu<<",instr,"<<packet->instr_id<<std::hex<<",addr,"<<hex2str(packet->address)<<",vaddr,"<<hex2str(packet->virt_addr)<<",d,"<<hex2str(packet->data)<<std::dec<<",lvl,"<<packet->ptw_level<<'\n'; 
+    // }
 
     DP (if (warmup_complete[packet->cpu]) {
     cout << "[" << NAME << "_MSHR] " <<  __func__ << " instr_id: " << MSHR.entry[mshr_index].instr_id;

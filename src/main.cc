@@ -894,6 +894,45 @@ void print_dram_stats()
     }
 }
 
+void print_service_time_histograms()
+{
+    cout << "==========================================================" << endl;
+    cout << "=== SERVICE TIME HISTOGRAMS ===" << endl;
+    cout << "==========================================================" << endl;
+
+    for (uint32_t i = 0; i < NUM_CPUS; i++) {
+        ooo_cpu[i].rob_lifetime_hist.printCsv(stdout, ("Core_" + to_string(i) + "_rob_lifetime_hist").c_str());
+        cout << endl;
+
+        ooo_cpu[i].ITLB.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_ITLB_service_time_hist").c_str());
+        cout << endl;
+        ooo_cpu[i].DTLB.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_DTLB_service_time_hist").c_str());
+        cout << endl;
+        ooo_cpu[i].STLB.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_STLB_service_time_hist").c_str());
+        cout << endl;
+        ooo_cpu[i].L1I.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_L1I_service_time_hist").c_str());
+        cout << endl;
+        ooo_cpu[i].L1D.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_L1D_service_time_hist").c_str());
+        cout << endl;
+        ooo_cpu[i].L2C.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_L2C_service_time_hist").c_str());
+        cout << endl;
+        uncore.LLC.service_time_hist.printCsv(stdout, ("Core_" + to_string(i) + "_LLC_service_time_hist").c_str());
+        cout << endl;
+
+        if (ooo_cpu[i].page_table_walker) {
+            const char *lvl_names[] = {"PML4", "PDPT", "PD", "PT"};
+            for (uint32_t lvl = 0; lvl < PWC_TOTAL_LEVELS; lvl++) {
+                string label = "Core_" + to_string(i) + "_PTW_level_" + lvl_names[PWC_TOTAL_LEVELS - 1 - lvl] + "_service_time_hist";
+                ooo_cpu[i].page_table_walker->level_service_time_hist[lvl].printCsv(stdout, label.c_str());
+                cout << endl;
+            }
+        }
+    }
+
+    uncore.DRAM.service_time_hist.printCsv(stdout, "DRAM_service_time_hist");
+    cout << endl;
+}
+
 void print_addr_translation_stats(uint32_t cpu)
 {
     uint64_t core_major_fault = 0;
@@ -1045,7 +1084,7 @@ static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter
             // address or ip can be passed based on need, but change "pkt.address" to "pkt.ip" 
             // in the filter.matches() function in case of tracking ip and make sure you set env to your desired ip.
             
-            if (!filter.matches(pkt.instr_id, (uint64_t)pkt.ip))
+            if (!filter.matches(pkt.instr_id, (uint64_t)pkt.instr_id))
                 continue;
             cout << "[TRACK][" << name << "] idx=" << j << " instr_id=" << pkt.instr_id
                  << " full_addr=0x" << hex << pkt.full_addr << dec
@@ -1577,6 +1616,7 @@ void print_final_stats()
     uncore.LLC.llc_replacement_final_stats();
     print_branch_stats();
     print_dram_stats();
+    print_service_time_histograms();
 #endif
 
     for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
@@ -1604,6 +1644,7 @@ int main(int argc, char** argv)
 	sigemptyset(&sigIntHandler.sa_mask);
 	sigIntHandler.sa_flags = 0;
 	sigaction(SIGINT, &sigIntHandler, NULL);
+    sigaction(SIGABRT, &sigIntHandler, NULL);
 
     cout << "**********************************************************" << endl
          << "   ChampSim Simulator. Mainline Checkout: Oct 18, 2021" << endl

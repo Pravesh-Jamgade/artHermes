@@ -543,6 +543,7 @@ void PTWclass::operate() {
             mshr[mshr_idx].instr_id        = walk.instr_id;
             mshr[mshr_idx].packet          = walk.packet;
             mshr[mshr_idx].feature_packet     = req;
+            mshr[mshr_idx].level_request_cycle = current_core_cycle[cpu];
 
             for (uint32_t lv = 0; lv < PWC_TOTAL_LEVELS; lv++)
                 mshr[mshr_idx].level_stats[lv] = walk.level_stats[lv];
@@ -573,8 +574,8 @@ void PTWclass::operate() {
             // the page fault in per-level stats 
             {
                 uint64_t shadow_val;
-                bool is_pf;
-                if (buddy_allocator.shadow_get_entry(pte_addr, curr_lvl, shadow_val, is_pf) && is_pf) {
+                bool is_pf, is_fa;
+                if (buddy_allocator.shadow_get_entry(pte_addr, curr_lvl, shadow_val, is_pf, is_fa) && is_pf) {
                     walk.level_stats[curr_lvl].page_fault = 1;
                     stats.level_stats[curr_lvl].page_faults++;
                     stats.total_page_faults++;
@@ -652,6 +653,9 @@ void PTWclass::handle_memory_response(PACKET *packet) {
 
             me->level_stats[lvl].hit_where = hit_src;
             me->packet.pwc_miss_mem_hitwhere |= ((uint32_t)hit_src << (lvl * 5));
+
+            uint64_t service_time = current_core_cycle[cpu] - me->level_request_cycle;
+            level_service_time_hist[lvl].update(service_time);
 
             // Insert into PwC: key = PTE byte address, value = next-level table base
             pwc_insert(me->current_pte_addr, next_level_base, lvl);

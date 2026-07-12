@@ -9,6 +9,7 @@
 #include "defs.h"
 #include "cache_repl_base.h"
 #include "const.h"
+#include "hist.h"
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
@@ -128,6 +129,8 @@ class CACHE : public MEMORY {
 
     // hitorgram of ROB position of loads missing in cache
     uint64_t missing_load_rob_pos_hist[ROB_SIZE];
+
+    LatencyHistogram service_time_hist;
 
     // To model probabilistic cache hit for performance headroom study
     std::default_random_engine generator;
