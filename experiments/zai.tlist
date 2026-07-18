@@ -15,11 +15,11 @@ TRACE=$(HERMES_TRACE)/bark.cpp-bark-small.coarse_token_gen.5.champsimtrace.gz
 KNOBS=""
 
 NAME=clip_trace_1.champsimtrace-024.gz
-TRACE=$(HERMES_TRACE)/clip_trace_1.champsimtrace-024.gz.champsimtrace.gz
+TRACE=$(HERMES_TRACE)/clip_trace_1.champsimtrace-024.gz
 KNOBS=""
 
 NAME=clip_trace_3.champsimtrace-020.gz
-TRACE=$(HERMES_TRACE)/clip_trace_3.champsimtrace-020.gz.champsimtrace.gz
+TRACE=$(HERMES_TRACE)/clip_trace_3.champsimtrace-020.gz
 KNOBS=""
 
 NAME=llama2.c-stories110M.1

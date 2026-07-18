@@ -49,7 +49,7 @@ PTWclass::PTWclass(uint32_t cpu_id)
     memset(&stats, 0, sizeof(stats));
 
     MAX_OUTSTANDING_WALKS = knob::bw_parallel_walk;
-    n_mshr = 4;
+    n_mshr = 8;
 
     // Instantiate off-chip predictor using Factory Pattern
     std::string pred_type = knob::enable_oracle_ptw_pred ? "oracle" : "perc";
