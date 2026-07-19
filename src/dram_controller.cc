@@ -213,6 +213,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             bool ddrp_req = (queue->entry[index].type == PREFETCH && queue->entry[index].fill_level==FILL_DDRP);
             if (queue->entry[index].type == TRANSLATION ||  ddrp_req)
             {
+                // by default if request is hermes data page ddrp, then it will return false
                is_pf = buddy_allocator.shadow_apply_pf_cost(queue->entry[index].full_addr, queue->entry[index].ptw_level);
             }
         }
@@ -580,24 +581,33 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 
         // DDRP -> pf=T,fa=T -> allocate -> DDRP_PROXY -> Regular -> pf=T,fa=F,due_cost=T -> CONSUME_LATENCY 
         // Regular and DDRP can lead to page fault
-        buddy_allocator.shadow_get_entry(packet->full_addr, packet->ptw_level, pte_data, is_pf, is_fa);
+        bool found_entry = buddy_allocator.shadow_get_entry(packet->full_addr, packet->ptw_level, pte_data, is_pf, is_fa);
         
-        // allocate only if page is accessed fist time and hence its pf is true
-        if(is_fa && is_pf){
-            pte_data = buddy_allocator.access();
-            fullAddrLevel_ptemap.insert({{packet->full_addr, packet->ptw_level}, pte_data});
+        if(found_entry)
+        {
+            // allocate only if page is accessed fist time and hence its pf is true
+            if(is_fa && is_pf){
+                pte_data = buddy_allocator.access();
+                fullAddrLevel_ptemap.insert({{packet->full_addr, packet->ptw_level}, pte_data});
+            }
+
+            // pf are two type PROXY for DDRP and PAGE_FAULT for normal page fault, hence we need to set the status of pte in shadowPT
+            if(is_pf){
+                if(ddrp_req){
+                    pte_status = PTEStatus::DDRP_PROXY;
+                }
+                // set first_access=0, set pte_status=ddrp_proxy OR no_fault, set consume_pf=1
+                buddy_allocator.shadow_set_entry(packet->full_addr, packet->ptw_level, pte_data, pte_status);
+            }
+            
+            packet->data = pte_data;
+        }
+        else
+        {
+            cerr << "@DRAM, add_rq(), pte not found, full_addr, " << std::hex << packet->full_addr << ", addr, " << packet->address << ", instr," << std::dec << packet->instr_id << '\n'; 
+            assert(false);
         }
 
-        // pf are two type PROXY for DDRP and PAGE_FAULT for normal page fault, hence we need to set the status of pte in shadowPT
-        if(is_pf){
-            if(ddrp_req){
-                pte_status = PTEStatus::DDRP_PROXY;
-            }
-            // set first_access=0, set pte_status=ddrp_proxy OR no_fault, set consume_pf=1
-            buddy_allocator.shadow_set_entry(packet->full_addr, packet->ptw_level, pte_data, pte_status);
-        }
-        
-        packet->data = pte_data;
     }
 
     // for warmup, we return without going to DRAM
@@ -660,7 +670,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
         {
             if (packet->type == TRANSLATION) 
             {
-                auto it_mapped = fullAddrLevel_ptemap.find({packet->address, packet->ptw_level});
+                auto it_mapped = fullAddrLevel_ptemap.find({packet->full_addr, packet->ptw_level});
                 buddy_allocator.shadow_get_entry(packet->full_addr, packet->ptw_level, packet->data);
 
                 if(it_mapped->second != packet->data)

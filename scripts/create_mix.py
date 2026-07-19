@@ -49,6 +49,6 @@ def generate_homogeneous_mix(input_file, output_file, num_cores=8):
 if __name__ == "__main__":
     # You can change these file names as needed
     infile = sys.argv[1]
-    outfile = "homogeneous_8core_mix.txt"
+    outfile = "core_mix.txt"
     
     generate_homogeneous_mix(infile, outfile, num_cores=2)

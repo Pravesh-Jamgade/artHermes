@@ -41,7 +41,7 @@ struct ShadowPTEntry {
     uint64_t value;       // physical address / PTE value
     PTEStatus page_fault;  // true until the PTW officially walks this entry
     bool access;    // first time accessed entry ?
-    bool consume_pf_cost;
+    bool consume_pf_cost;// if(access) --> set(consume_pf_cost=1) --> shadow_apply_pf_cost(..) --> set(consume_pf_cost=0)
     ShadowPTEntry() : value(0), access(true), page_fault(PTEStatus::FAULT), consume_pf_cost(0) {}
 };
 
