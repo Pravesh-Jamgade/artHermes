@@ -10,7 +10,7 @@
 ###############################################################
 
 # configurations
-# MODIFIED For just one walk at a time (originally --rob_partition_size=64,128,320 )
+# MODIFIED For just one walk at a time
 BASE = --bw_parallel_walk=1 --disable_l1_translation_install=true --llc_replacement_type=ship --config=$(HERMES_HOME)/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=25,50,125 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
 
 SMS = --l2c_prefetcher_types=sms --config=$(HERMES_HOME)/config/sms.ini --l2c_prefetcher_force_prefetch_at_llc=true
@@ -29,15 +29,10 @@ OCP_ORACLE = --config=$(HERMES_HOME)/config/ocp_trans.ini --ddrp_req_latency=6 -
 HERMES_O = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=6
 HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 
-IDEAL_STLB = --ideal_stlb=true
-IDEAL_DRAM_PAGEFAULT = --ideal_dram_page_fault_latency_only=true
+# this were designed after google workloads proved the bottleneck
+# now testing gap with ocp_oracle
 
 normal          $(BASE)
-
-### this where designed to estimate the gap
-#IDEAL_DRAM = --ideal_dram_queue_latency_only=true
-#IDEAL_DRAM_ROWBUFFER = --ideal_dram_row_buffer_latency_only=true
-ideal_stlb      $(BASE) $(IDEAL_STLB)
-ideal_dram_pf   $(BASE) $(IDEAL_DRAM_PAGEFAULT)
+ocp_oracle      $(BASE) $(OCP_ORACLE)
 
 
