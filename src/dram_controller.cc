@@ -602,12 +602,6 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
             
             packet->data = pte_data;
         }
-        else
-        {
-            cerr << "@DRAM, add_rq(), pte not found, full_addr, " << std::hex << packet->full_addr << ", addr, " << packet->address << ", instr," << std::dec << packet->instr_id << '\n'; 
-            assert(false);
-        }
-
     }
 
     // for warmup, we return without going to DRAM
