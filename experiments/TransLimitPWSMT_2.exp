@@ -33,9 +33,6 @@ IDEAL_STLB = --ideal_stlb=true
 IDEAL_DRAM_PAGEFAULT = --ideal_dram_page_fault_latency_only=true
 
 normal          $(BASE)
+ocp_oracle      $(BASE) $(OCP_ORACLE)
 ideal_stlb      $(BASE) $(IDEAL_STLB)
 ideal_dram_pf   $(BASE) $(IDEAL_DRAM_PAGEFAULT)
-
-
-#IDEAL_DRAM = --ideal_dram_queue_latency_only=true
-#IDEAL_DRAM_ROWBUFFER = --ideal_dram_row_buffer_latency_only=true

@@ -32,7 +32,7 @@ HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 # this were designed after google workloads proved the bottleneck
 # now testing gap with ocp_oracle
 
-normal          $(BASE)
+### failed 18 july, now running 22 july normal          $(BASE)
 ocp_oracle      $(BASE) $(OCP_ORACLE)
 
 
