@@ -780,6 +780,24 @@ void print_branch_stats()
             << "Core_" << i << "_branch_return " << ooo_cpu[i].total_branch_types[6] << endl
             << "Core_" << i << "_branch_other " << ooo_cpu[i].total_branch_types[7] << endl
             << endl;
+
+        for (int j = 0; j < knob::num_threads_per_core; j++) {
+            uint64_t preds = ooo_cpu[i].thread_branch_predictions[j];
+            uint64_t mispreds = ooo_cpu[i].thread_branch_mispredictions[j];
+            float acc = preds ? (100.0f * (preds - mispreds) / preds) : 0.0f;
+            float avg_res_lat = preds ? ((float)ooo_cpu[i].thread_branch_resolution_latency[j] / preds) : 0.0f;
+
+            cout << "Core_" << i << "_Thread_" << j << "_branch_predictions " << preds << endl
+                 << "Core_" << i << "_Thread_" << j << "_branch_mispredictions " << mispreds << endl
+                 << "Core_" << i << "_Thread_" << j << "_branch_accuracy_pct " << acc << endl
+                 << "Core_" << i << "_Thread_" << j << "_avg_branch_resolution_latency " << avg_res_lat << endl
+                 << "Core_" << i << "_Thread_" << j << "_mispredict_recovery_cycles " << ooo_cpu[i].thread_mispredict_recovery_cycles[j] << endl
+                 << "Core_" << i << "_Thread_" << j << "_wrong_path_fetched_instructions " << ooo_cpu[i].thread_wrong_path_fetched_instructions[j] << endl
+                 << "Core_" << i << "_Thread_" << j << "_wrong_path_executed_loads " << ooo_cpu[i].thread_wrong_path_executed_loads[j] << endl
+                 << "Core_" << i << "_Thread_" << j << "_fetch_cycles_allocated " << ooo_cpu[i].thread_fetch_cycles_allocated[j] << endl
+                 << "Core_" << i << "_Thread_" << j << "_retire_rob_head_not_executed_stall " << ooo_cpu[i].thread_retire_rob_head_not_executed[j] << endl
+                 << endl;
+        }
     //     cout << endl << "CPU " << i << " Branch Prediction Accuracy: ";
     //     cout << (100.0*(ooo_cpu[i].num_branch - ooo_cpu[i].branch_mispredictions)) / ooo_cpu[i].num_branch;
     //     cout << "% MPKI: " << (1000.0*ooo_cpu[i].branch_mispredictions)/(ooo_cpu[i].num_retired - ooo_cpu[i].warmup_instructions);
@@ -987,6 +1005,7 @@ void finish_warmup()
         ooo_cpu[i].L1I.reset_stats(i);
         ooo_cpu[i].L1D.reset_stats(i);
         ooo_cpu[i].L2C.reset_stats(i);
+        ooo_cpu[i].page_table_walker->reset_stats();
         uncore.LLC.reset_stats(i);
     }
     uncore.DRAM.reset_stats();
@@ -1894,7 +1913,16 @@ int main(int argc, char** argv)
         ooo_cpu[i].thread_finish_sim_instr.resize(knob::num_threads_per_core, 0);
         ooo_cpu[i].thread_sim_instructions_read.resize(knob::num_threads_per_core, 0);
         ooo_cpu[i].thread_warmup_complete.resize(knob::num_threads_per_core, 0);
-        ooo_cpu[i].thread_simulation_complete.resize(knob::num_threads_per_core, 0); 
+        ooo_cpu[i].fetch_stall.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].fetch_resume_cycle.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_branch_predictions.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_branch_mispredictions.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_branch_resolution_latency.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_mispredict_recovery_cycles.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_wrong_path_fetched_instructions.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_wrong_path_executed_loads.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_fetch_cycles_allocated.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].thread_retire_rob_head_not_executed.resize(knob::num_threads_per_core, 0);
     }
 
     uncore.LLC.llc_initialize_replacement();
@@ -1940,8 +1968,11 @@ int main(int argc, char** argv)
                 {
                     if (ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].executed != COMPLETED)
                     {
-                        if (warmup_complete[i])
+                        if (warmup_complete[i]) {
                             ooo_cpu[i].stats.stalls.retire_rob_head_not_executed++;
+                            int head_tid = ooo_cpu[i].ROB.entry[ooo_cpu[i].ROB.head].asid[1] % knob::num_threads_per_core;
+                            ooo_cpu[i].thread_retire_rob_head_not_executed[head_tid]++;
+                        }
                     }
                 }
 
@@ -1989,7 +2020,7 @@ int main(int argc, char** argv)
                     ooo_cpu[i].fetch_instruction();
             
                     // read from trace
-                    if ((ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE) && (ooo_cpu[i].fetch_stall == 0))
+                    if (ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE)
                     {
                         ooo_cpu[i].read_from_trace();
                     }

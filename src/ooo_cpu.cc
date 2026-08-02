@@ -113,6 +113,19 @@ void O3_CPU::read_from_trace()
     if (trace_reader.empty()) {
         trace_reader.resize(knob::num_threads_per_core, nullptr);
     }
+    if (fetch_stall.size() < knob::num_threads_per_core) {
+        fetch_stall.resize(knob::num_threads_per_core, 0);
+        fetch_resume_cycle.resize(knob::num_threads_per_core, 0);
+    }
+    if (thread_simulation_complete.size() < knob::num_threads_per_core) {
+        thread_simulation_complete.resize(knob::num_threads_per_core, 0);
+    }
+    if (thread_warmup_complete.size() < knob::num_threads_per_core) {
+        thread_warmup_complete.resize(knob::num_threads_per_core, 0);
+    }
+    if (thread_sim_instructions_read.size() < knob::num_threads_per_core) {
+        thread_sim_instructions_read.resize(knob::num_threads_per_core, 0);
+    }
 
     for (int j = 0; j < knob::num_threads_per_core; j++) {
         if (!trace_reader[j]) {
@@ -157,6 +170,16 @@ void O3_CPU::read_from_trace()
             for (int attempts = 0; attempts < knob::num_threads_per_core; attempts++) {
                 int j = (last_thread_read[cpu] + attempts) % knob::num_threads_per_core;
                 if((thread_warmup_complete[j] || thread_simulation_complete[j]) && last_thread_read[cpu] == j) continue;
+
+                if (fetch_stall[j] == 1 && current_core_cycle[cpu] >= fetch_resume_cycle[j] && fetch_resume_cycle[j] != 0) {
+                    fetch_stall[j] = 0;
+                    fetch_resume_cycle[j] = 0;
+                }
+                if (fetch_stall[j] == 1) continue;
+
+                uint32_t max_ifetch_watermark = IFETCH_BUFFER.SIZE / knob::num_threads_per_core;
+                if (get_ifetch_occupancy(j) >= max_ifetch_watermark) continue;
+
                 bool thread_active = (trace_reader[j] && !trace_reader[j]->eof());
             
                 if (warmup_complete[cpu] && thread_sim_instructions_read[j] >= simulation_instructions) {
@@ -176,12 +199,31 @@ void O3_CPU::read_from_trace()
 
             last_thread_read[cpu] = thread_to_read;
         }
+        else
+        {
+            if (fetch_stall[0] == 1 && current_core_cycle[cpu] >= fetch_resume_cycle[0] && fetch_resume_cycle[0] != 0) {
+                fetch_stall[0] = 0;
+                fetch_resume_cycle[0] = 0;
+            }
+            if (fetch_stall[0] == 1 || get_ifetch_occupancy(0) >= IFETCH_BUFFER.SIZE) {
+                continue_reading = 0;
+                break;
+            }
+        }
 
         ooo_model_instr arch_instr = trace_reader[thread_to_read]->get();
+        arch_instr.asid[0] = cpu;
+        arch_instr.asid[1] = thread_to_read + (cpu * knob::num_threads_per_core);
         instr_read++;
+        arch_instr.fetched_cycle = current_core_cycle[cpu];
 
         if (warmup_complete[cpu]) {
             thread_sim_instructions_read[thread_to_read]++;
+            thread_fetch_cycles_allocated[thread_to_read]++;
+            if (fetch_stall[thread_to_read] == 1) {
+                arch_instr.is_wrong_path = 1;
+                thread_wrong_path_fetched_instructions[thread_to_read]++;
+            }
         }
 
         // set the unique instruction id
@@ -393,6 +435,10 @@ void O3_CPU::read_from_trace()
             if (IFETCH_BUFFER.entry[ifetch_buffer_index].is_branch) 
             {
                 num_branch++;
+                int branch_tid = IFETCH_BUFFER.entry[ifetch_buffer_index].asid[1] % knob::num_threads_per_core;
+                if (warmup_complete[cpu]) {
+                    thread_branch_predictions[branch_tid]++;
+                }
                 DP( if (warmup_complete[cpu]) {
                 cout << "[BRANCH] instr_id: " << instr_unique_id << " ip: " << hex << arch_instr.ip << dec << " taken: " << +arch_instr.branch_taken << endl; });
 
@@ -413,7 +459,9 @@ void O3_CPU::read_from_trace()
                     total_rob_occupancy_at_branch_mispredict += ROB.occupancy;
                     if(warmup_complete[cpu])
                     {
-                        fetch_stall = 1;
+                        thread_branch_mispredictions[branch_tid]++;
+                        mispredict_stalling_thread = branch_tid;
+                        fetch_stall[branch_tid] = 1;
                         instrs_to_read_this_cycle = 0;
                         IFETCH_BUFFER.entry[ifetch_buffer_index].branch_mispredicted = 1;
                     }
@@ -613,21 +661,66 @@ uint32_t O3_CPU::check_rob(uint64_t instr_id)
     return ROB.SIZE;
 }
 
+uint32_t O3_CPU::get_ifetch_occupancy(uint32_t tid)
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < IFETCH_BUFFER.SIZE; i++) {
+        if (IFETCH_BUFFER.entry[i].ip != 0 && (IFETCH_BUFFER.entry[i].asid[1] % knob::num_threads_per_core) == tid)
+            count++;
+    }
+    return count;
+}
+
+uint32_t O3_CPU::get_decode_occupancy(uint32_t tid)
+{
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < DECODE_BUFFER.SIZE; i++) {
+        if (DECODE_BUFFER.entry[i].ip != 0 && (DECODE_BUFFER.entry[i].asid[1] % knob::num_threads_per_core) == tid)
+            count++;
+    }
+    return count;
+}
+
+uint32_t O3_CPU::get_rob_occupancy(uint32_t tid)
+{
+    uint32_t count = 0;
+    if (ROB.head < ROB.tail) {
+        for (uint32_t i = ROB.head; i < ROB.tail; i++) {
+            if (ROB.entry[i].ip != 0 && (ROB.entry[i].asid[1] % knob::num_threads_per_core) == tid)
+                count++;
+        }
+    } else if (ROB.occupancy > 0) {
+        for (uint32_t i = ROB.head; i < ROB.SIZE; i++) {
+            if (ROB.entry[i].ip != 0 && (ROB.entry[i].asid[1] % knob::num_threads_per_core) == tid)
+                count++;
+        }
+        for (uint32_t i = 0; i < ROB.tail; i++) {
+            if (ROB.entry[i].ip != 0 && (ROB.entry[i].asid[1] % knob::num_threads_per_core) == tid)
+                count++;
+        }
+    }
+    return count;
+}
+
 void O3_CPU::fetch_instruction()
 {
-    // TODO: can we model wrong path execusion?
-    // probalby not
-  
-    // if we had a branch mispredict, turn fetching back on after the branch mispredict penalty
-    if((fetch_stall == 1) && (current_core_cycle[cpu] >= fetch_resume_cycle) && (fetch_resume_cycle != 0))
-    {
-        fetch_stall = 0;
-        fetch_resume_cycle = 0;
+    if (fetch_stall.size() < knob::num_threads_per_core) {
+        fetch_stall.resize(knob::num_threads_per_core, 0);
+        fetch_resume_cycle.resize(knob::num_threads_per_core, 0);
     }
 
-    if (fetch_stall == 1) {
-        if (warmup_complete[cpu])
-            stats.stalls.fetch_branch_mispredict++;
+    // if we had a branch mispredict, turn fetching back on after the branch mispredict penalty
+    for (int tid = 0; tid < knob::num_threads_per_core; tid++) {
+        if ((fetch_stall[tid] == 1) && (current_core_cycle[cpu] >= fetch_resume_cycle[tid]) && (fetch_resume_cycle[tid] != 0)) {
+            fetch_stall[tid] = 0;
+            fetch_resume_cycle[tid] = 0;
+        }
+        if (fetch_stall[tid] == 1) {
+            if (warmup_complete[cpu]) {
+                stats.stalls.fetch_branch_mispredict++;
+                thread_mispredict_recovery_cycles[tid]++;
+            }
+        }
     }
 
     if(IFETCH_BUFFER.occupancy == 0)
@@ -787,7 +880,9 @@ void O3_CPU::fetch_instruction()
       
         if((IFETCH_BUFFER.entry[IFETCH_BUFFER.head].translated == COMPLETED) && (IFETCH_BUFFER.entry[IFETCH_BUFFER.head].fetched == COMPLETED))
 	    {
-	        if(DECODE_BUFFER.occupancy < DECODE_BUFFER.SIZE)
+	        uint32_t decode_tid = IFETCH_BUFFER.entry[IFETCH_BUFFER.head].asid[1] % knob::num_threads_per_core;
+	        uint32_t max_decode_watermark = DECODE_BUFFER.SIZE / knob::num_threads_per_core;
+	        if(DECODE_BUFFER.occupancy < DECODE_BUFFER.SIZE && get_decode_occupancy(decode_tid) < max_decode_watermark)
 	        {
                 uint32_t decode_index = add_to_decode_buffer(&IFETCH_BUFFER.entry[IFETCH_BUFFER.head]);
                 DECODE_BUFFER.entry[decode_index].event_cycle = 0;
@@ -832,8 +927,12 @@ void O3_CPU::decode_and_dispatch()
 	        break;
 	    }
       
-        if(((!warmup_complete[cpu]) && (ROB.occupancy < ROB.SIZE)) ||
-	        ((DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle != 0) && (DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle < current_core_cycle[cpu]) && (ROB.occupancy < ROB.SIZE)))
+        uint32_t rob_tid = DECODE_BUFFER.entry[DECODE_BUFFER.head].asid[1] % knob::num_threads_per_core;
+        uint32_t max_rob_watermark = ROB.SIZE / knob::num_threads_per_core;
+        bool rob_has_space = (ROB.occupancy < ROB.SIZE) && (get_rob_occupancy(rob_tid) < max_rob_watermark);
+
+        if(((!warmup_complete[cpu]) && rob_has_space) ||
+	        ((DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle != 0) && (DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle < current_core_cycle[cpu]) && rob_has_space))
 	    {
 	        // move this instruction to the ROB if there's space
 	        uint32_t rob_index = add_to_rob(&DECODE_BUFFER.entry[DECODE_BUFFER.head]);
@@ -1415,7 +1514,10 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
     LQ.entry[lq_index].asid[0] = ROB.entry[rob_index].asid[0];
     LQ.entry[lq_index].asid[1] = ROB.entry[rob_index].asid[1];
     LQ.entry[lq_index].event_cycle = current_core_cycle[cpu] + SCHEDULING_LATENCY;
-    LQ.entry[lq_index].went_offchip_pred = offchip_pred->predict(&ROB.entry[rob_index], data_index, &LQ.entry[lq_index]);
+    if (offchip_pred)
+        LQ.entry[lq_index].went_offchip_pred = offchip_pred->predict(&ROB.entry[rob_index], data_index, &LQ.entry[lq_index]);
+    else
+        LQ.entry[lq_index].went_offchip_pred = 0;
     LQ.occupancy++;
 
     // check RAW dependency
@@ -1938,6 +2040,11 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
 
 int O3_CPU::execute_load(uint32_t rob_index, uint32_t lq_index, uint32_t data_index)
 {
+    int load_tid = LQ.entry[lq_index].asid[1] % knob::num_threads_per_core;
+    if (warmup_complete[cpu] && ROB.entry[rob_index].is_wrong_path) {
+        thread_wrong_path_executed_loads[load_tid]++;
+    }
+
     // add it to L1D
     PACKET data_packet;
     data_packet.fill_level = FILL_L1;
@@ -1972,6 +2079,13 @@ int O3_CPU::execute_load(uint32_t rob_index, uint32_t lq_index, uint32_t data_in
 
 void O3_CPU::complete_execution(uint32_t rob_index)
 {
+    int rob_tid = ROB.entry[rob_index].asid[1] % knob::num_threads_per_core;
+    if (warmup_complete[cpu] && ROB.entry[rob_index].is_branch) {
+        uint64_t lat = (current_core_cycle[cpu] >= ROB.entry[rob_index].fetched_cycle) ? 
+                       (current_core_cycle[cpu] - ROB.entry[rob_index].fetched_cycle) : 0;
+        thread_branch_resolution_latency[rob_tid] += lat;
+    }
+
     if (ROB.entry[rob_index].is_memory == 0) // non-memory instructions
     {
         if ((ROB.entry[rob_index].executed == INFLIGHT) && (ROB.entry[rob_index].event_cycle <= current_core_cycle[cpu])) 
@@ -1987,12 +2101,12 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 
             if (ROB.entry[rob_index].branch_mispredicted)
 	        {
-		        fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
+		        fetch_resume_cycle[rob_tid] = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
 	        }
 
             DP(if(warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
-            cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall;
+            cout << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted << " fetch_stall: " << +fetch_stall[rob_tid];
             cout << " event: " << ROB.entry[rob_index].event_cycle << endl; });
         }
     }
@@ -2013,13 +2127,13 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 
                 if (ROB.entry[rob_index].branch_mispredicted)
 		        {
-		            fetch_resume_cycle = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
+		            fetch_resume_cycle[rob_tid] = current_core_cycle[cpu] + BRANCH_MISPREDICT_PENALTY;
 		        }
 
                 DP(if(warmup_complete[cpu]) {
                 cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
                 cout << " is_memory: " << +ROB.entry[rob_index].is_memory << " branch_mispredicted: " << +ROB.entry[rob_index].branch_mispredicted;
-                cout << " fetch_stall: " << +fetch_stall << " event: " << ROB.entry[rob_index].event_cycle << " current: " << current_core_cycle[cpu] << endl; });
+                cout << " fetch_stall: " << +fetch_stall[rob_tid] << " event: " << ROB.entry[rob_index].event_cycle << " current: " << current_core_cycle[cpu] << endl; });
             }
         }
     }

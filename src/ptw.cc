@@ -3,7 +3,6 @@
 #include "champsim.h"
 #include "ooo_cpu.h"
 #include "cache.h"
-#include "stlb_ptw_integration.h"
 #include "uncore.h"
 #include "buddy_allocator.h"
 #include <iostream>
@@ -14,7 +13,7 @@
 #include "offchip_pred_base.h"
 #include "offchip_pred_factory.h"
 
-static const uint64_t CR3_STRIDE_10GB = (10ULL * 1024ULL * 1024ULL * 1024ULL);
+static const uint64_t CR3_STRIDE_1GB = (1ULL * 1024ULL * 1024ULL * 1024ULL);
 
 using namespace std;
 
@@ -77,7 +76,7 @@ void PTWclass::initialize() {
 
     // Initialize per-CPU CR3 bases with 10GB spacing
     for (uint32_t i = 0; i < 256; i++) {
-        cr3_base_addrs[i] = (uint64_t)(i + 1) * CR3_STRIDE_10GB;
+        cr3_base_addrs[i] = (uint64_t)(i + 1) * CR3_STRIDE_1GB;
     }
     
     // Initialize unified PwC
@@ -97,6 +96,8 @@ void PTWclass::initialize() {
             }
         }
     }
+
+    bzero(stats.level_stats, sizeof(stats.level_stats));
 }
 
 // Get set index for a PwC level
@@ -490,6 +491,8 @@ void PTWclass::operate() {
             req.lq_index      = walk.packet.lq_index;
             req.pwc_miss_mem_hitwhere = walk.packet.pwc_miss_mem_hitwhere; // to set prev-walk on/off-chip features for perceptron
 
+            bool is_l1d_hit = l1d->free_lookup(&req);
+           
             trans_offchip_pred->set_state_info(&req); // set all necessary info for predictor to make decision and for training on response
 
             if (!already_in_flight) {
@@ -624,6 +627,9 @@ void PTWclass::handle_memory_response(PACKET *packet) {
     else if (packet->hit_where >= hit_where_t::LLC && packet->hit_where <= hit_where_t::LLC_MSHR) { hit_src = hit_where_t::LLC; stats.level_stats[lvl].llc_hits++; }
     else if (packet->hit_where == hit_where_t::DRAM)                                             { hit_src = hit_where_t::DRAM; stats.level_stats[lvl].dram_hits++; }
     
+    if(packet->hit_where > hit_where_t::INV && packet->hit_where < hit_where_t::NumHitWheres)
+        stats.level_detail_stats[lvl].ptwlevel_detail_stats[packet->hit_where]++;
+
     // train
     trans_offchip_pred->train(packet);
 
@@ -737,6 +743,14 @@ bool PTWclass::oracle_predictor(PACKET* packet)
     return !found_on_chip; // predict off-chip if not found in any on-chip cache
 }
 
+void PTWclass::reset_stats(){
+    bzero(&stats, sizeof(stats));
+    bzero(&level_service_time_hist, sizeof(level_service_time_hist));
+    bzero(mshr->level_stats, sizeof(mshr->level_stats));
+    mshr->total_page_faults = 0;
+    mshr->level_request_cycle = 0;
+}
+
 // Print configuration
 void PTWclass::print_config() {
 }
@@ -791,6 +805,23 @@ void PTWclass::print_stats() {
              << "," << stats.level_stats[lvl].llc_hits
              << "," << stats.level_stats[lvl].dram_hits
              << "\n";
+
+        cout << "PTW," << cpu << "," << pfx << "hits,l1,l1_rq,l1_mshr,l2,l2_rq,l2_mshr,llc,llc_rq,llc_mshr,dram\n";
+        cout << "PTW," << cpu << "," << pfx << "hits"
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L1D]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L1D_RQ]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L1D_MSHR]
+
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L2C]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L2C_RQ]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::L2C_MSHR]
+
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::LLC]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::LLC_RQ]
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::LLC_MSHR]
+
+             << "," << stats.level_detail_stats[lvl].ptwlevel_detail_stats[hit_where_t::DRAM]
+             << '\n';
 
         cout << '\n';
     }

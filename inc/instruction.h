@@ -143,6 +143,7 @@ class ooo_model_instr {
             branch_taken,
             branch_mispredicted,
             branch_prediction_made,
+            is_wrong_path,
             translated,
             data_translated,
             source_added[NUM_INSTR_SOURCES],
@@ -248,6 +249,7 @@ class ooo_model_instr {
         branch_taken = 0;
         branch_mispredicted = 0;
 	    branch_prediction_made = 0;
+        is_wrong_path = 0;
         translated = 0;
         data_translated = 0;
         is_producer = 0;

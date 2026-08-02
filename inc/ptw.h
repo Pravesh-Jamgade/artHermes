@@ -157,6 +157,11 @@ public:
             uint64_t dram_hits;
         } level_stats[PWC_TOTAL_LEVELS];
 
+        struct LevelDetailStat
+        {
+            uint64_t ptwlevel_detail_stats[hit_where_t::NumHitWheres];
+        } level_detail_stats[PWC_TOTAL_LEVELS];
+        
         struct offchip_pred_stats {
             uint32_t ddrp_offchip_calls;
             uint32_t ddrp_offchip_sent;
@@ -217,6 +222,8 @@ public:
   
     // Check if walk can proceed
     bool is_walk_queue_available(uint64_t vaddr);
+
+    void reset_stats();
 
     // Print PTW statistics
     void print_stats();

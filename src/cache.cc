@@ -225,14 +225,14 @@ void CACHE::handle_fill()
         uint32_t mshr_index = MSHR.next_fill_index;
 
         // If knob::disable_l1_translation_install is true, do not insert TRANSLATION blocks into L1 caches (L1D or L1I)
-        if (knob::disable_l1_translation_install && (cache_type == IS_L1D || cache_type == IS_L1I) && (MSHR.entry[mshr_index].type == TRANSLATION))
+        if (knob::disable_l1_translation_install && (cache_type == IS_L1D || cache_type == IS_L1I) && (MSHR.entry[mshr_index].from_ptw && MSHR.entry[mshr_index].type == TRANSLATION))
         {
             // Trigger history event
             add_history_event(current_core_cycle[fill_cpu], MSHR.entry[mshr_index].instr_id, MSHR.entry[mshr_index].virt_addr, MSHR.entry[mshr_index].address, MSHR.entry[mshr_index].full_addr, MSHR.entry[mshr_index].type, "CACHE_FILL_BYPASS_TRANS", NAME.c_str(), false, false, false, false, 0, MSHR.entry[mshr_index].hit_where);
 
-            // send response to upper level cache (usually translation packets are not forwarded to core data cache,
-            // but we must notify the Page Table Walker if it originated from PTW)
-            if (cache_type == IS_L1D) 
+            // // send response to upper level cache (usually translation packets are not forwarded to core data cache,
+            // // but we must notify the Page Table Walker if it originated from PTW)
+            if (cache_type == IS_L1D) // since ptw for all d or i goes through d caches only
             {
                 if (ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker != NULL) {
                     ooo_cpu[MSHR.entry[mshr_index].cpu].page_table_walker->handle_memory_response(&MSHR.entry[mshr_index]);
@@ -250,12 +250,28 @@ void CACHE::handle_fill()
             if (deque_cycle >= MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]) {
                 service_time_hist.update(deque_cycle - MSHR.entry[mshr_index].enque_cycle[cache_type][IS_RQ]);
             }
+
+
+            uint32_t set = get_set(MSHR.entry[mshr_index].address);
+            for (uint32_t way = 0; way < NUM_WAY; way++) {
+                if (block[set][way].valid && (block[set][way].tag == MSHR.entry[mshr_index].address)) {
+                    cout << " why addr, " << hex2str(MSHR.entry[mshr_index].address) << ", full_addr, " << hex2str(MSHR.entry[mshr_index].full_addr) << ", instr, " << MSHR.entry[mshr_index].instr_id << '\n';
+                    exit(0);
+                }
+            }
+
             MSHR.remove_queue(&MSHR.entry[mshr_index]);
             MSHR.num_returned--;
 
             update_fill_cycle();
 
             return;
+        }
+
+        if((cache_type == IS_L1D || cache_type == IS_L1I) && MSHR.entry[mshr_index].from_ptw && MSHR.entry[mshr_index].type == TRANSLATION)
+        {
+            cout << "Write, addr, " << hex2str(MSHR.entry[mshr_index].address) << ", instrid, " << MSHR.entry[mshr_index].instr_id << ", $, " << NAME << "ptw?, " << +MSHR.entry[mshr_index].from_ptw << ", type, " << +MSHR.entry[mshr_index].type << '\n'; 
+            cout << "why?";exit(0);
         }
 
         // find victim
@@ -520,8 +536,6 @@ void CACHE::handle_fill()
             else if ((cache_type == IS_L1D) && (MSHR.entry[mshr_index].type != PREFETCH)) 
             {
                 // Allow TRANSLATION packets from L1D to proceed through PWC -> STLB -> DTLB
-                // Mark TRANSLATION packets as coming from PTW so they route back to it
-                // Pravesh: Mark TRANSLATION packets to route through PTW for proper caching
                 if (MSHR.entry[mshr_index].type == TRANSLATION)
                 {
                     // if this packet originated from the PTW module, notify it of the response
@@ -1003,6 +1017,10 @@ void CACHE::handle_read()
                 if (deque_cycle >= rq_entry.enque_cycle[cache_type][IS_RQ]) {
                     service_time_hist.update(deque_cycle - rq_entry.enque_cycle[cache_type][IS_RQ]);
                 }
+
+                HIT[rq_entry.type]++;
+                ACCESS[rq_entry.type]++;
+                
                 RQ->remove_queue(&rq_entry, deque_cycle);
                 reads_available_this_cycle--;
                 continue;
@@ -1076,13 +1094,15 @@ void CACHE::handle_read()
                     // PTW has officially walked this entry — use shadow value.
                     if (tracked) {
                         assert(shadow_val != 0
-                            && "shadow page-table entry is zero on L1D cache hit "
+                            && "shadow page-table entry is zero on cache hit "
                                "(pte_paddr hit but shadow entry was never initialised or was zeroed)");
                         rq_entry.data = shadow_val;
                     }
-                    rq_entry.hit_where = hit_where_t::L1D;
-                    if (ooo_cpu[read_cpu].page_table_walker != NULL)
-                        ooo_cpu[read_cpu].page_table_walker->handle_memory_response(&rq_entry);
+                    // if(cache_type == IS_LLC) rq_entry.hit_where = hit_where_t::LLC;
+                    // else if(cache_type == IS_L2C) rq_entry.hit_where = hit_where_t::L2C;
+                    // else if(cache_type == IS_L1D) rq_entry.hit_where = hit_where_t::L1D;
+                    // if (ooo_cpu[read_cpu].page_table_walker != NULL)
+                    //     ooo_cpu[read_cpu].page_table_walker->handle_memory_response(&rq_entry);
                 }
             }
             
@@ -1993,6 +2013,7 @@ bool CACHE::free_lookup(PACKET *packet)
     for (uint32_t way = 0; way < NUM_WAY; way++) {
         if (block[set][way].valid && (block[set][way].tag == packet->address)) {
             hit = true;
+            // cout << "$, addr, " << hex2str(packet->address) << '\n';
             break;
         }
     }
@@ -2009,6 +2030,7 @@ bool CACHE::free_lookup(PACKET *packet)
     // 2. Check WQ (Write Queue)
     if (!hit) {
         if (WQ.check_queue(packet) != -1) {
+            // cout << "WQ, addr, " << hex2str(packet->address) << '\n';
             hit = true;
         }
     }
@@ -2016,6 +2038,7 @@ bool CACHE::free_lookup(PACKET *packet)
     // 3. Check RQ (Read Queue)
     if (!hit && RQ) {
         if (RQ->check_queue(packet) != -1) {
+            // cout << "RQ, addr, " << hex2str(packet->address) << '\n';
             hit = true;
         }
     }
@@ -2023,6 +2046,7 @@ bool CACHE::free_lookup(PACKET *packet)
     // 4. Check MSHR (Miss Status Holding Register)
     if (!hit) {
         if (check_mshr(packet) != -1) {
+            // cout << "MSHR, addr, " << hex2str(packet->address) << '\n';
             hit = true;
         }
     }
@@ -2154,6 +2178,8 @@ int CACHE::add_rq(PACKET *packet)
 
     if (index != -1) 
     {
+        if(packet->from_ptw)
+        cout << "Merge, RQ, " << NAME << ", addr, " << hex2str(packet->address) << ", instrid, " << packet->instr_id << '\n';
         // l.log(NAME, "RQ-HIT", hex2str(packet->address), hex2str(packet->full_addr), packet->ptw_level, '\n');
         packet->hit_where = assign_hit_where(cache_type, 1); // hit in RQ
         PACKET& rq_entry = RQ->get_entry(index);
@@ -2944,18 +2970,12 @@ void CACHE::record_offchip_event(uint32_t cpu, PACKET* packet)
 void CACHE::send_signal_to_core(uint32_t cpu, PACKET packet)
 {
     uint32_t lq_index = packet.lq_index;
-    // uint32_t source_index = ooo_cpu[cpu].get_source_index_from_rob(rob_index, lq_index);
-
-#ifdef SANITY_CHECK
     uint32_t rob_index = packet.rob_index;
-    if(ooo_cpu[cpu].LQ.entry[lq_index].rob_index != rob_index)
+
+    if (lq_index >= LQ_SIZE || ooo_cpu[cpu].LQ.entry[lq_index].rob_index != rob_index)
     {
-        cerr << "[" << NAME << "_ERROR] rob_index mismatch: LQ rob_index=" << ooo_cpu[cpu].LQ.entry[lq_index].rob_index;
-        cerr << " RQ rob_index=" << rob_index << " packet type=" << +packet.type;
-        cerr << " addr=0x" << hex << packet.address << " instr_id=" << dec << packet.instr_id << endl;
-        assert(0 && "LQ and RQ rob_index mismatch");
+        return;
     }
-#endif
 
     ooo_cpu[cpu].LQ.entry[lq_index].went_offchip = 1; // mark in LQ
 

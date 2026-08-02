@@ -88,6 +88,15 @@ public:
     std::vector<uint64_t> thread_sim_instructions_read;
     std::vector<uint8_t> thread_warmup_complete;
     std::vector<uint8_t> thread_simulation_complete;
+    std::vector<uint64_t> thread_branch_predictions;
+    std::vector<uint64_t> thread_branch_mispredictions;
+    std::vector<uint64_t> thread_branch_resolution_latency;
+    std::vector<uint64_t> thread_mispredict_recovery_cycles;
+    std::vector<uint64_t> thread_wrong_path_fetched_instructions;
+    std::vector<uint64_t> thread_wrong_path_executed_loads;
+    std::vector<uint64_t> thread_fetch_cycles_allocated;
+    std::vector<uint64_t> thread_retire_rob_head_not_executed;
+    int mispredict_stalling_thread = -1;
     uint64_t instr_read = 0;
 
     // instruction
@@ -126,10 +135,13 @@ public:
 
     // branch
     int branch_mispredict_stall_fetch; // flag that says that we should stall because a branch prediction was wrong
-    int mispredicted_branch_iw_index; // index in the instruction window of the mispredicted branch.  fetch resumes after the instruction at this index executes
-    uint8_t  fetch_stall;
-    uint64_t fetch_resume_cycle;
+    std::vector<uint8_t> fetch_stall;
+    std::vector<uint64_t> fetch_resume_cycle;
     uint64_t num_branch, branch_mispredictions;
+
+    uint32_t get_ifetch_occupancy(uint32_t tid);
+    uint32_t get_decode_occupancy(uint32_t tid);
+    uint32_t get_rob_occupancy(uint32_t tid);
     uint64_t total_rob_occupancy_at_branch_mispredict;
     uint64_t total_branch_types[8];
 
@@ -265,9 +277,8 @@ public:
 
         // branch
         branch_mispredict_stall_fetch = 0;
-        mispredicted_branch_iw_index = 0;
-        fetch_stall = 0;
-        fetch_resume_cycle = 0;
+        std::fill(fetch_stall.begin(), fetch_stall.end(), 0);
+        std::fill(fetch_resume_cycle.begin(), fetch_resume_cycle.end(), 0);
         num_branch = 0;
         branch_mispredictions = 0;
 	    for(uint32_t i=0; i<8; i++)
@@ -363,6 +374,16 @@ public:
         frontal_load_per_ip_stats.clear();
         for(uint32_t index = 0; index < NUM_PARTITION_TYPES; ++index)
             load_per_rob_part_stats[index].reset();
+
+        std::fill(thread_branch_predictions.begin(), thread_branch_predictions.end(), 0);
+        std::fill(thread_branch_mispredictions.begin(), thread_branch_mispredictions.end(), 0);
+        std::fill(thread_branch_resolution_latency.begin(), thread_branch_resolution_latency.end(), 0);
+        std::fill(thread_mispredict_recovery_cycles.begin(), thread_mispredict_recovery_cycles.end(), 0);
+        std::fill(thread_wrong_path_fetched_instructions.begin(), thread_wrong_path_fetched_instructions.end(), 0);
+        std::fill(thread_wrong_path_executed_loads.begin(), thread_wrong_path_executed_loads.end(), 0);
+        std::fill(thread_fetch_cycles_allocated.begin(), thread_fetch_cycles_allocated.end(), 0);
+        std::fill(thread_retire_rob_head_not_executed.begin(), thread_retire_rob_head_not_executed.end(), 0);
+        mispredict_stalling_thread = -1;
     }
 
     // functions
