@@ -80,6 +80,8 @@ public:
     vector<int> thread;
     vector<string> thread_trace_string;
     vector<int> last_thread_read;
+    vector<uint64_t> stall_by_page_fault;
+    vector<queue<uint64_t>> stall_quant;
 
     std::vector<uint64_t> thread_num_retired;
     std::vector<uint64_t> thread_begin_sim_instr;
@@ -96,6 +98,7 @@ public:
     std::vector<uint64_t> thread_wrong_path_executed_loads;
     std::vector<uint64_t> thread_fetch_cycles_allocated;
     std::vector<uint64_t> thread_retire_rob_head_not_executed;
+
     int mispredict_stalling_thread = -1;
     uint64_t instr_read = 0;
 

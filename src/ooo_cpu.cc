@@ -21,7 +21,6 @@
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS]; 
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
-uint64_t stall_by_page_fault[NUM_CPUS];
 uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 
 namespace knob
@@ -142,6 +141,7 @@ void O3_CPU::read_from_trace()
         if (warmup_complete[cpu] && thread_sim_instructions_read[j] >= simulation_instructions) {
             thread_active = false;
         }
+
         if (thread_active) {
             any_active = true;
             break;
@@ -169,6 +169,22 @@ void O3_CPU::read_from_trace()
             thread_to_read = -1;
             for (int attempts = 0; attempts < knob::num_threads_per_core; attempts++) {
                 int j = (last_thread_read[cpu] + attempts) % knob::num_threads_per_core;
+
+                // trying to immitate OS bubbles because of page-fault triggered OS routine spawning
+                if(stall_by_page_fault[j] > current_core_cycle[cpu])
+                {
+                    continue;
+                }
+                else
+                {   
+                    if(stall_quant[j].empty() == false)
+                    {
+                        stall_by_page_fault[j] = current_core_cycle[cpu] + stall_quant[j].front();
+                        stall_quant[j].pop();
+                        continue;
+                    }
+                }
+
                 if((thread_warmup_complete[j] || thread_simulation_complete[j]) && last_thread_read[cpu] == j) continue;
 
                 if (fetch_stall[j] == 1 && current_core_cycle[cpu] >= fetch_resume_cycle[j] && fetch_resume_cycle[j] != 0) {
@@ -201,6 +217,22 @@ void O3_CPU::read_from_trace()
         }
         else
         {
+            if(stall_by_page_fault[0] > current_core_cycle[cpu])
+            {
+                continue_reading = 0;
+                break;
+            }
+            else
+            {
+                if(stall_quant[0].empty() == false)
+                {
+                    stall_by_page_fault[0] = current_core_cycle[cpu] + stall_quant[0].front();
+                    stall_quant[0].pop();
+                    continue_reading = 0;
+                    break;
+                }
+            }
+
             if (fetch_stall[0] == 1 && current_core_cycle[cpu] >= fetch_resume_cycle[0] && fetch_resume_cycle[0] != 0) {
                 fetch_stall[0] = 0;
                 fetch_resume_cycle[0] = 0;
@@ -1026,6 +1058,8 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 
       pf_packet.ip = pf_v_addr;
       pf_packet.type = PREFETCH;
+      pf_packet.asid[0] = cpu;
+      pf_packet.asid[1] = cpu * knob::num_threads_per_core;
       pf_packet.event_cycle = current_core_cycle[cpu];
 
       L1I.add_pq(&pf_packet);    

@@ -476,6 +476,8 @@ void PTWclass::operate() {
             req.is_data      = 1;
             req.type         = TRANSLATION;
             req.instruction  = 0;
+            req.asid[0]      = walk.packet.asid[0];
+            req.asid[1]      = walk.packet.asid[1];
             req.tlb_access   = 1;
             req.fill_level   = FILL_L1;
             req.fill_l1d     = 1;

@@ -103,7 +103,6 @@ time_t start_time;
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
 queue <uint64_t > page_queue;
-queue <uint64_t > stall_quant;
 map <uint64_t, uint64_t> page_table, inverse_table, recent_page;
 vector<map<uint64_t, uint64_t>> unique_cl;
 uint64_t previous_ppage, num_adjacent_page, allocated_pages;
@@ -601,6 +600,101 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         << "Core_" << cpu << "_" << cache->NAME << "_eviction_all_reuse_min " << cache->stats.eviction.all_reuse_min << endl
         << "Core_" << cpu << "_" << cache->NAME << "_eviction_all_reuse_avg " << (float)cache->stats.eviction.all_reuse_total / cache->stats.eviction.atleast_one_reuse << endl
         ;
+
+    if (cache->cache_type == IS_L2C) {
+        // Helper lambda for printing 2D FootprintMetrics (rows = footprint size 0..8, cols = LRU pos 0..NUM_WAY-1)
+        auto print_2d_metrics = [&](const string &metric_name, const decltype(cache->stats.footprint.general) &m) {
+            cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_max_" << metric_name << ",size";
+            for (uint32_t lru_pos = 0; lru_pos < cache->NUM_WAY; lru_pos++) {
+                cout << "," << lru_pos;
+            }
+            cout << endl;
+            for (uint32_t size = 0; size <= 8; size++) {
+                cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_max_" << metric_name << "," << size;
+                for (uint32_t lru_pos = 0; lru_pos < cache->NUM_WAY; lru_pos++) {
+                    cout << "," << m.max_footprint_lru_hist[lru_pos][size];
+                }
+                cout << endl;
+            }
+        };
+
+        // // Print general 2D stats
+        // print_2d_metrics("footprint_lru", cache->stats.footprint.general);
+
+        // // Print trans_together 2D stats
+        // print_2d_metrics("trans_together_footprint_lru", cache->stats.footprint.trans_together);
+
+        // // Print trans_level 2D stats (level 0 to 4)
+        // for (uint32_t lvl = 0; lvl < 5; lvl++) {
+        //     string lvl_name = "trans_lvl_" + to_string(lvl) + "_footprint_lru";
+        //     print_2d_metrics(lvl_name, cache->stats.footprint.trans_level[lvl]);
+        // }
+
+        // Print 1D Invalid PTE count histograms
+        auto print_1d_pte = [&](const string &metric_name, const uint64_t *arr) {
+            cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_" << metric_name;
+            for (uint32_t i = 0; i <= 8; i++) {
+                cout << "," << i;
+            }
+            cout << endl;
+            cout << "Core_" << cpu << "_" << cache->NAME;
+            for (uint32_t i = 0; i <= 8; i++) {
+                cout << "," << arr[i];
+            }
+            cout << endl;
+        };
+
+        print_1d_pte("translation_invalid_pte_count", cache->stats.footprint.translation_invalid_pte_count_hist);cout << '\n';
+        // for (uint32_t lvl = 0; lvl < 5; lvl++) {
+        //     print_1d_pte("trans_lvl_" + to_string(lvl) + "_invalid_pte_count", cache->stats.footprint.trans_level_invalid_pte_count_hist[lvl]);
+        // }
+
+        // footprint size histogram;
+        uint64_t footprint_size_hist[9] = {0};
+        uint64_t trans_footprint_size_hist[9] = {0};
+        uint64_t trans_level_footprint_size_hist[5][9] = {0};
+        for (uint32_t size = 0; size <= 8; size++){
+            for(uint32_t lru_pos = 0; lru_pos < cache->NUM_WAY; lru_pos++){
+                footprint_size_hist[size] += cache->stats.footprint.general.max_footprint_lru_hist[lru_pos][size];
+            }
+            for(uint32_t lvl = 0; lvl < 5; lvl++){
+                for(uint32_t lru_pos = 0; lru_pos < cache->NUM_WAY; lru_pos++){
+                    trans_level_footprint_size_hist[lvl][size] += cache->stats.footprint.trans_level[lvl].max_footprint_lru_hist[lru_pos][size];
+                    trans_footprint_size_hist[size] += cache->stats.footprint.trans_level[lvl].max_footprint_lru_hist[lru_pos][size];
+                }
+            }
+        }
+
+        print_1d_pte("footprint_size", footprint_size_hist); cout << '\n';
+        print_1d_pte("trans_together_footprint_size", trans_footprint_size_hist); cout << '\n';
+        for(uint32_t lvl = 0; lvl < 5; lvl++) {
+            print_1d_pte("trans_lvl_" + to_string(lvl) + "_footprint_size", trans_level_footprint_size_hist[lvl]);
+            cout << '\n';
+        }
+
+        // Print entry reuse histograms (buckets on rows, entries on columns)
+        string bucket_names[5] = {"1_1", "2_4", "5_8", "9_16", "gt_16"};
+        auto print_reuse_2d = [&](const string &metric_name, const uint64_t arr[8][5]) {
+            cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_" << metric_name << ",entries";
+            for (uint32_t b = 0; b < 5; b++) {
+                cout << "," << bucket_names[b];
+            }
+            cout << endl;
+            for (uint32_t e = 0; e < 8; e++) {
+                cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_" << metric_name << ", pte_count_" << e;
+                for (uint32_t b = 0; b < 5; b++) {
+                    cout << "," << arr[e][b];
+                }
+                cout << endl;
+            }
+        };
+
+        // print_reuse_2d("entry_reuse", cache->stats.footprint.general_entry_reuse_hist);
+        // print_reuse_2d("trans_together_entry_reuse", cache->stats.footprint.trans_together_entry_reuse_hist);
+        // for (uint32_t lvl = 0; lvl < 5; lvl++) {
+        //     print_reuse_2d("trans_lvl_" + to_string(lvl) + "_entry_reuse", cache->stats.footprint.trans_level_entry_reuse_hist[lvl]);
+        // }
+    }
     
 #ifdef PRINT_AUX_STATS
     for(uint32_t type = LOAD; type < NUM_TYPES; ++type)
@@ -1883,7 +1977,6 @@ int main(int argc, char** argv)
         simulation_complete[i] = 0;
         current_core_cycle[i] = 0;
         stall_cycle[i] = 0;
-        stall_by_page_fault[i] = 0;
         
         previous_ppage = 0;
         num_adjacent_page = 0;
@@ -1923,6 +2016,8 @@ int main(int argc, char** argv)
         ooo_cpu[i].thread_wrong_path_executed_loads.resize(knob::num_threads_per_core, 0);
         ooo_cpu[i].thread_fetch_cycles_allocated.resize(knob::num_threads_per_core, 0);
         ooo_cpu[i].thread_retire_rob_head_not_executed.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].stall_by_page_fault.resize(knob::num_threads_per_core, 0);
+        ooo_cpu[i].stall_quant.resize(knob::num_threads_per_core, queue<uint64_t>());
     }
 
     uncore.LLC.llc_initialize_replacement();
@@ -2003,27 +2098,13 @@ int main(int argc, char** argv)
                     ooo_cpu[i].decode_and_dispatch();
                 }
                 
-                // trying to immitate OS bubbles because of page-fault triggered OS routine spawning
-                if(stall_by_page_fault[i] > current_core_cycle[i])
+                // fetch
+                ooo_cpu[i].fetch_instruction();
+        
+                // read from trace
+                if (ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE)
                 {
-
-                }
-                else
-                {
-                    if(stall_quant.empty() == false)
-                    {
-                        stall_by_page_fault[i] = current_core_cycle[i] + stall_quant.front();
-                        stall_quant.pop();
-                    }
-
-                    // fetch
-                    ooo_cpu[i].fetch_instruction();
-            
-                    // read from trace
-                    if (ooo_cpu[i].IFETCH_BUFFER.occupancy < ooo_cpu[i].IFETCH_BUFFER.SIZE)
-                    {
-                        ooo_cpu[i].read_from_trace();
-                    }
+                    ooo_cpu[i].read_from_trace();
                 }
 	        }
 

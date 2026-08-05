@@ -20,3 +20,8 @@ std::vector<int32_t> get_array_int(const char *str);
 std::vector<float> get_array_float(const char *str);
 
 #endif /* KNOBS_H */
+
+namespace knob
+{
+    extern std::string footprint_track_type;
+}

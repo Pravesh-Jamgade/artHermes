@@ -13,6 +13,7 @@ using namespace std;
 namespace knob
 {
 	uint64_t warmup_instructions = 0;
+	string footprint_track_type = "LOAD";
 	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
@@ -542,6 +543,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
     else if (MATCH("", "warmup_instructions"))
     {
 		knob::warmup_instructions = atol(value);
+    }
+    else if (MATCH("", "footprint_track_type"))
+    {
+		knob::footprint_track_type = string(value);
     }
     else if (MATCH("", "simulation_instructions"))
     {

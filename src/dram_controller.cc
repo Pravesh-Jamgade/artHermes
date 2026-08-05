@@ -218,8 +218,9 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             }
         }
 
-        LATENCY = 0; 
+        LATENCY = 0;
         
+        uint32_t stall_id = queue->entry[index].asid[1] % knob::num_threads_per_core;
         if(queue->entry[index].from_ptw)
         {
             if(knob::ideal_dram_queue_latency_only)
@@ -235,7 +236,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             {
                 if(is_pf)
                 {
-                    stall_quant.push(1000);
+                    ooo_cpu[op_cpu].stall_quant[stall_id].push(1000);
                     LATENCY = PAGE_FAULT_LATENCY;
                 }
             }
@@ -243,7 +244,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
             {
                 if (is_pf) 
                 {
-                    stall_quant.push(1000);
+                    ooo_cpu[op_cpu].stall_quant[stall_id].push(1000);
                     LATENCY += PAGE_FAULT_LATENCY;   
                 }
                         
@@ -257,7 +258,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         {
             if (is_pf) 
             {
-                stall_quant.push(1000);
+                ooo_cpu[op_cpu].stall_quant[stall_id].push(1000);
                 LATENCY += PAGE_FAULT_LATENCY;   
             }
                     

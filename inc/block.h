@@ -31,6 +31,8 @@ class BLOCK {
              ip,
              cpu,
              instr_id;
+    
+    uint8_t asid[2];
 
     // replacement state
     uint32_t lru;
@@ -45,6 +47,16 @@ class BLOCK {
     uint32_t reuse_frontal_dorsal[NUM_PARTITION_TYPES];
     uint32_t doa_pred_bit;   // Deadblock pred: LLC perceptron prediction (0=unset, 1 doa)
     uint32_t usage;          // Deadblock pred: hit counter (0 on fill, incremented on each hit)
+
+    struct FootprintMetadata {
+        uint8_t footprint;
+        uint32_t max_lru_footprint_change;
+        bool footprint_changed;
+        uint8_t packet_type;
+        uint32_t ptw_level;
+        bool track_footprint;
+        uint32_t entry_reuse[8];
+    } footprint;
 
     BLOCK() {
         valid = 0;
@@ -61,12 +73,25 @@ class BLOCK {
         full_addr = 0;
         tag = 0;
         data = 0;
+        ip = 0;
         cpu = 0;
         instr_id = 0;
+        asid[0] = UINT8_MAX;
+        asid[1] = UINT8_MAX;
 
         lru = 0;
         doa_pred_bit = 0; // Deadblock pred
         usage = 0;         // Deadblock pred
+
+        footprint.footprint = 0;
+        footprint.max_lru_footprint_change = 0;
+        footprint.footprint_changed = false;
+        footprint.packet_type = 0;
+        footprint.ptw_level = 0;
+        footprint.track_footprint = false;
+        for (int i = 0; i < 8; i++) {
+            footprint.entry_reuse[i] = 0;
+        }
 
         reset_metadata();
     };
@@ -89,6 +114,15 @@ class BLOCK {
         critical_actual = false;
         critical_pred = false;
         fill_ip = 0xdeadbeef;
+        footprint.footprint = 0;
+        footprint.max_lru_footprint_change = 0;
+        footprint.footprint_changed = false;
+        footprint.packet_type = 0;
+        footprint.ptw_level = 0;
+        footprint.track_footprint = false;
+        for (int i = 0; i < 8; i++) {
+            footprint.entry_reuse[i] = 0;
+        }
     }
 };
 

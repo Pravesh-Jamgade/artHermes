@@ -377,6 +377,8 @@ void CACHE::handle_fill()
                     writeback_packet.instr_id = MSHR.entry[mshr_index].instr_id;
                     writeback_packet.ip = 0; // writeback does not have ip
                     writeback_packet.type = WRITEBACK;
+                    writeback_packet.asid[0] = block[set][way].asid[0];
+                    writeback_packet.asid[1] = block[set][way].asid[1];
                     writeback_packet.event_cycle = current_core_cycle[fill_cpu];
 
                     lower_level->add_wq(&writeback_packet);
@@ -599,6 +601,21 @@ void CACHE::handle_writeback()
         {
             WQ.entry[index].hit_where = assign_hit_where(cache_type, 0); // writeback hit
             
+            // Update footprint on hit
+            if (block[set][way].footprint.track_footprint) {
+                uint32_t word_num = (WQ.entry[index].full_addr >> 3) & 0x7;
+                uint8_t word_bit = (1 << word_num);
+                if ((block[set][way].footprint.footprint & word_bit) == 0) {
+                    block[set][way].footprint.footprint |= word_bit;
+                    if (block[set][way].lru > block[set][way].footprint.max_lru_footprint_change) {
+                        block[set][way].footprint.max_lru_footprint_change = block[set][way].lru;
+                    }
+                    block[set][way].footprint.footprint_changed = true;
+                } else {
+                    block[set][way].footprint.entry_reuse[word_num]++;
+                }
+            }
+
             if (cache_type == IS_LLC) 
             {
                 llc_update_replacement_state(writeback_cpu, set, way, block[set][way].full_addr, WQ.entry[index].ip, 0, WQ.entry[index].type, 1);
@@ -848,6 +865,8 @@ void CACHE::handle_writeback()
                             writeback_packet.instr_id = WQ.entry[index].instr_id;
                             writeback_packet.ip = 0;
                             writeback_packet.type = WRITEBACK;
+                            writeback_packet.asid[0] = block[set][way].asid[0];
+                            writeback_packet.asid[1] = block[set][way].asid[1];
                             writeback_packet.event_cycle = current_core_cycle[writeback_cpu];
 
                             lower_level->add_wq(&writeback_packet);
@@ -1108,6 +1127,20 @@ void CACHE::handle_read()
             
             if (way >= 0) // read hit
             {
+                // Update footprint on hit
+                if (block[set][way].footprint.track_footprint) {
+                    uint32_t word_num = (rq_entry.full_addr >> 3) & 0x7;
+                    uint8_t word_bit = (1 << word_num);
+                    if ((block[set][way].footprint.footprint & word_bit) == 0) {
+                        block[set][way].footprint.footprint |= word_bit;
+                        if (block[set][way].lru > block[set][way].footprint.max_lru_footprint_change) {
+                            block[set][way].footprint.max_lru_footprint_change = block[set][way].lru;
+                        }
+                        block[set][way].footprint.footprint_changed = true;
+                    } else {
+                        block[set][way].footprint.entry_reuse[word_num]++;
+                    }
+                }
 
                 // cout <<NAME<< ",hit,cpu,"<<read_cpu<<",addr,"<<hex2str(rq_entry.address)<<",vaddr,"<<hex2str(rq_entry.virt_addr)<<",lvl,"<<rq_entry.ptw_level<<'\n'; 
                 
@@ -1575,6 +1608,21 @@ void CACHE::handle_prefetch()
             
             if (way >= 0) // prefetch hit
             { 
+                // Update footprint on hit
+                if (block[set][way].footprint.track_footprint) {
+                    uint32_t word_num = (PQ.entry[index].full_addr >> 3) & 0x7;
+                    uint8_t word_bit = (1 << word_num);
+                    if ((block[set][way].footprint.footprint & word_bit) == 0) {
+                        block[set][way].footprint.footprint |= word_bit;
+                        if (block[set][way].lru > block[set][way].footprint.max_lru_footprint_change) {
+                            block[set][way].footprint.max_lru_footprint_change = block[set][way].lru;
+                        }
+                        block[set][way].footprint.footprint_changed = true;
+                    } else {
+                        block[set][way].footprint.entry_reuse[word_num]++;
+                    }
+                }
+
                 PQ.entry[index].hit_where = assign_hit_where(cache_type, 0); // prefetch hit
 
                 // update replacement policy
@@ -1913,9 +1961,30 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
     block[set][way].ip = packet->ip;
     block[set][way].cpu = packet->cpu;
     block[set][way].instr_id = packet->instr_id;
+    block[set][way].asid[0] = packet->asid[0];
+    block[set][way].asid[1] = packet->asid[1];
 
     block[set][way].reset_metadata();
     block[set][way].fill_ip = packet->ip;
+
+    block[set][way].footprint.packet_type = packet->type;
+    block[set][way].footprint.ptw_level = packet->ptw_level;
+
+    bool track = false;
+    if (knob::footprint_track_type == "ALL") {
+        track = true;
+    } else if (knob::footprint_track_type == "LOAD" && packet->type == LOAD) {
+        track = true;
+    } else if (knob::footprint_track_type == "PREFETCH" && packet->type == PREFETCH) {
+        track = true;
+    } else if (knob::footprint_track_type == "TRANSLATION" && packet->type == TRANSLATION) {
+        track = true;
+    }
+    block[set][way].footprint.track_footprint = track;
+
+    block[set][way].footprint.footprint = 0;
+    block[set][way].footprint.max_lru_footprint_change = 0;
+    block[set][way].footprint.footprint_changed = false;
 
     DP ( if (warmup_complete[packet->cpu]) {
     cout << "[" << NAME << "] " << __func__ << " set: " << set << " way: " << way;
@@ -2385,6 +2454,8 @@ int CACHE::prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int 
             //pf_packet.rob_index = LQ.entry[lq_index].rob_index;
             pf_packet.ip = ip;
             pf_packet.type = PREFETCH;
+            pf_packet.asid[0] = cpu;
+            pf_packet.asid[1] = cpu * knob::num_threads_per_core;
             pf_packet.event_cycle = current_core_cycle[cpu];
 
             // give a dummy 0 as the IP of a prefetch
@@ -2426,6 +2497,8 @@ int CACHE::kpc_prefetch_line(uint64_t base_addr, uint64_t pf_addr, int pf_fill_l
             //pf_packet.rob_index = LQ.entry[lq_index].rob_index;
             pf_packet.ip = 0;
             pf_packet.type = PREFETCH;
+            pf_packet.asid[0] = cpu;
+            pf_packet.asid[1] = cpu * knob::num_threads_per_core;
             pf_packet.delta = delta;
             pf_packet.depth = depth;
             pf_packet.signature = signature;
@@ -2787,6 +2860,87 @@ void CACHE::prefetcher_feedback(uint64_t &pref_gen, uint64_t &pref_fill, uint64_
 void CACHE::track_stats_from_victim(uint32_t set, uint32_t way)
 {
     stats.eviction.total++;
+
+    // Footprint tracking stats at eviction
+    if (block[set][way].footprint.track_footprint) {
+        uint32_t footprint_size = 0;
+        for (int i = 0; i < 8; i++) {
+            if ((block[set][way].footprint.footprint & (1 << i)) != 0) {
+                footprint_size++;
+            }
+        }
+        if (block[set][way].footprint.footprint_changed) {
+            uint32_t max_lru = block[set][way].footprint.max_lru_footprint_change;
+            if (max_lru < 64) {
+                stats.footprint.general.max_footprint_lru_hist[max_lru][footprint_size]++;
+            }
+            
+            // Translation stats (together and level-specific)
+            if (block[set][way].footprint.packet_type == TRANSLATION) {
+                if (max_lru < 64) {
+                    stats.footprint.trans_together.max_footprint_lru_hist[max_lru][footprint_size]++;
+                }
+                uint32_t lvl = block[set][way].footprint.ptw_level;
+                if (lvl < 5) {
+                    if (max_lru < 64) {
+                        stats.footprint.trans_level[lvl].max_footprint_lru_hist[max_lru][footprint_size]++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Invalid PTE tracking for translation blocks
+    if (block[set][way].footprint.packet_type == TRANSLATION) {
+        uint32_t invalid_count = 0;
+        for (uint32_t i = 0; i < 8; i++) {
+            uint64_t pte_addr = (block[set][way].address << 6) + i * 8;
+            uint64_t val = 0;
+            bool is_page_fault = false;
+            bool is_first_access = false;
+            bool tracked = buddy_allocator.shadow_get_entry(pte_addr, (uint8_t)block[set][way].footprint.ptw_level, val, is_page_fault, is_first_access);
+            if (!tracked || is_page_fault) {
+                invalid_count++;
+            }
+        }
+        if (invalid_count <= 8) {
+            stats.footprint.translation_invalid_pte_count_hist[invalid_count]++;
+            uint32_t lvl = block[set][way].footprint.ptw_level;
+            if (lvl < 5) {
+                stats.footprint.trans_level_invalid_pte_count_hist[lvl][invalid_count]++;
+            }
+        }
+    }
+
+    // Entry reuse tracking
+    if (block[set][way].footprint.track_footprint) {
+        for (uint32_t e = 0; e < 8; e++) {
+            uint32_t c = block[set][way].footprint.entry_reuse[e];
+            int b = -1;
+            if (c == 1) {
+                b = 0;
+            } else if (c >= 2 && c <= 4) {
+                b = 1;
+            } else if (c >= 5 && c <= 8) {
+                b = 2;
+            } else if (c >= 9 && c <= 16) {
+                b = 3;
+            } else if (c > 16) {
+                b = 4;
+            }
+            
+            if (b >= 0) {
+                stats.footprint.general_entry_reuse_hist[e][b]++;
+                if (block[set][way].footprint.packet_type == TRANSLATION) {
+                    stats.footprint.trans_together_entry_reuse_hist[e][b]++;
+                    uint32_t lvl = block[set][way].footprint.ptw_level;
+                    if (lvl < 5) {
+                        stats.footprint.trans_level_entry_reuse_hist[lvl][e][b]++;
+                    }
+                }
+            }
+        }
+    }
 
     // keep count of blocks that have seen at least one reuse of specific access type
     for(uint32_t type = LOAD; type < NUM_TYPES; ++type)

@@ -13,6 +13,10 @@
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
+namespace knob {
+    extern std::string footprint_track_type;
+}
+
 class CACHE : public MEMORY {
   public:
     uint32_t cpu;
@@ -56,6 +60,21 @@ class CACHE : public MEMORY {
     // some stats to collect during cache eviction
     struct
     {
+        struct FootprintMetrics {
+            uint64_t max_footprint_lru_hist[64][9];
+        };
+
+        struct {
+            FootprintMetrics general;
+            FootprintMetrics trans_together;
+            FootprintMetrics trans_level[5];
+            uint64_t translation_invalid_pte_count_hist[9];
+            uint64_t trans_level_invalid_pte_count_hist[5][9];
+            uint64_t general_entry_reuse_hist[8][5];
+            uint64_t trans_together_entry_reuse_hist[8][5];
+            uint64_t trans_level_entry_reuse_hist[5][8][5];
+        } footprint;
+
         struct
         {
             uint64_t total;
@@ -168,6 +187,33 @@ class CACHE : public MEMORY {
 
         llc_repl = NULL;
         llc_pred_perc = NULL;
+
+        for (int i = 0; i < 64; i++) {
+            for (int j = 0; j < 9; j++) {
+                stats.footprint.general.max_footprint_lru_hist[i][j] = 0;
+                stats.footprint.trans_together.max_footprint_lru_hist[i][j] = 0;
+                for (int l = 0; l < 5; l++) {
+                    stats.footprint.trans_level[l].max_footprint_lru_hist[i][j] = 0;
+                }
+            }
+        }
+        for (int j = 0; j < 9; j++) {
+            stats.footprint.translation_invalid_pte_count_hist[j] = 0;
+            for (int l = 0; l < 5; l++) {
+                stats.footprint.trans_level_invalid_pte_count_hist[l][j] = 0;
+            }
+        }
+
+        // Initialize entry reuse histograms
+        for (int e = 0; e < 8; e++) {
+            for (int b = 0; b < 5; b++) {
+                stats.footprint.general_entry_reuse_hist[e][b] = 0;
+                stats.footprint.trans_together_entry_reuse_hist[e][b] = 0;
+                for (int l = 0; l < 5; l++) {
+                    stats.footprint.trans_level_entry_reuse_hist[l][e][b] = 0;
+                }
+            }
+        }
     }
 
     // destructor

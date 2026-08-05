@@ -54,12 +54,9 @@ extern uint8_t warmup_complete[NUM_CPUS],
 
 extern uint64_t current_core_cycle[NUM_CPUS], 
                 stall_cycle[NUM_CPUS], 
-                stall_by_page_fault[NUM_CPUS],
                 last_drc_read_mode, 
                 last_drc_write_mode,
                 drc_blocks;
-
-extern queue<uint64_t> stall_quant;
 
 #include <vector>
 extern queue <uint64_t> page_queue;
