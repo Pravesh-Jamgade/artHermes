@@ -1379,18 +1379,19 @@ void CACHE::handle_read()
                         }
                         else
                         {
-                        // add it to mshr (read miss)
-                        add_mshr(&rq_entry);
+                        
                         // add it to the next level's read queue
                         if (lower_level)
                         {
                             if (lower_level->get_occupancy(1, rq_entry.address) == lower_level->get_size(1, rq_entry.address))
                             {
                                 miss_handled = 0;
-                                // STALL[rq_entry.type]++; ??pravesh
+                                STALL[rq_entry.type]++; //??pravesh
                             }
                             else
                             {
+                                // add it to mshr (read miss)
+                                add_mshr(&rq_entry);
                                 lower_level->add_rq(&rq_entry);
                             }
 
@@ -1399,6 +1400,8 @@ void CACHE::handle_read()
                         {
                             if (cache_type == IS_STLB)
                             {
+                                // add it to mshr (read miss)
+                                add_mshr(&rq_entry);
                                 uint64_t pa = va_to_pa(rq_entry.asid[1], rq_entry.instr_id, rq_entry.full_addr, rq_entry.address, 0);
                                 rq_entry.data = pa >> LOG2_PAGE_SIZE;
                                 rq_entry.event_cycle = current_core_cycle[read_cpu];
@@ -3060,7 +3063,7 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
         // else if(where_in_cache == 3)    return hit_where_t::DTLB_MSHR;
         return hit_where_t::DTLB;
     }
-    else if(cache_type == STLB)
+    else if(cache_type == IS_STLB)
     {
         return hit_where_t::STLB;
     }
@@ -3092,7 +3095,7 @@ hit_where_t CACHE::assign_hit_where(uint8_t cache_type, uint32_t where_in_cache)
         else if(where_in_cache == 2)    return hit_where_t::LLC_WQ;
         else if(where_in_cache == 3)    return hit_where_t::LLC_MSHR;
     }
-    else if(cache_type == DRAM)
+    else if(cache_type == IS_DRAM)
     {
        return hit_where_t::DRAM;
     }

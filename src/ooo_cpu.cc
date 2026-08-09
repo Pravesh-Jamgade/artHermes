@@ -193,8 +193,7 @@ void O3_CPU::read_from_trace()
                 }
                 if (fetch_stall[j] == 1) continue;
 
-                uint32_t max_ifetch_watermark = IFETCH_BUFFER.SIZE / knob::num_threads_per_core;
-                if (get_ifetch_occupancy(j) >= max_ifetch_watermark) continue;
+                if (IFETCH_BUFFER.occupancy >= IFETCH_BUFFER.SIZE) continue;
 
                 bool thread_active = (trace_reader[j] && !trace_reader[j]->eof());
             
@@ -912,9 +911,7 @@ void O3_CPU::fetch_instruction()
       
         if((IFETCH_BUFFER.entry[IFETCH_BUFFER.head].translated == COMPLETED) && (IFETCH_BUFFER.entry[IFETCH_BUFFER.head].fetched == COMPLETED))
 	    {
-	        uint32_t decode_tid = IFETCH_BUFFER.entry[IFETCH_BUFFER.head].asid[1] % knob::num_threads_per_core;
-	        uint32_t max_decode_watermark = DECODE_BUFFER.SIZE / knob::num_threads_per_core;
-	        if(DECODE_BUFFER.occupancy < DECODE_BUFFER.SIZE && get_decode_occupancy(decode_tid) < max_decode_watermark)
+	        if(DECODE_BUFFER.occupancy < DECODE_BUFFER.SIZE)
 	        {
                 uint32_t decode_index = add_to_decode_buffer(&IFETCH_BUFFER.entry[IFETCH_BUFFER.head]);
                 DECODE_BUFFER.entry[decode_index].event_cycle = 0;
@@ -959,9 +956,7 @@ void O3_CPU::decode_and_dispatch()
 	        break;
 	    }
       
-        uint32_t rob_tid = DECODE_BUFFER.entry[DECODE_BUFFER.head].asid[1] % knob::num_threads_per_core;
-        uint32_t max_rob_watermark = ROB.SIZE / knob::num_threads_per_core;
-        bool rob_has_space = (ROB.occupancy < ROB.SIZE) && (get_rob_occupancy(rob_tid) < max_rob_watermark);
+        bool rob_has_space = (ROB.occupancy < ROB.SIZE);
 
         if(((!warmup_complete[cpu]) && rob_has_space) ||
 	        ((DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle != 0) && (DECODE_BUFFER.entry[DECODE_BUFFER.head].event_cycle < current_core_cycle[cpu]) && rob_has_space))
