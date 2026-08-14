@@ -1,12 +1,93 @@
-APP_PATH=$(GRAPH_APP)/bc
-APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
-APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
-
 APP_PATH=$(GRAPH_APP)/cc
 APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
+APP_ARG=-n16
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/bc
+APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
+APP_ARG=-i4 -n16 
 APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
 
 APP_PATH=$(GRAPH_APP)/bfs
 APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
+APP_ARG=-n64
 APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
 
+APP_PATH=$(GRAPH_APP)/sssp
+APP_INPUT=-f $(GRAPH_INPUT)/web.wsg 
+APP_ARG=-d2
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/pr
+APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
+APP_ARG=-i1000 -t1e-4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/tc
+APP_INPUT=-f $(GRAPH_INPUT)/web.sg
+APP_ARG=-n3
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+############  17G  kron.sg 
+
+APP_PATH=$(GRAPH_APP)/cc
+APP_INPUT=-f $(GRAPH_INPUT)/kron.sg
+APP_ARG=-n16
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/bc
+APP_INPUT=-f $(GRAPH_INPUT)/kron.sg
+APP_ARG=-i4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/bfs
+APP_INPUT=-f $(GRAPH_INPUT)/kron.sg 
+APP_ARG=-n64
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/sssp
+APP_INPUT=-f $(GRAPH_INPUT)/kron.wsg 
+APP_ARG=-d2
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/pr
+APP_INPUT=-f $(GRAPH_INPUT)/kron.sg 
+APP_ARG=-i1000 -t1e-4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/tc
+APP_INPUT=-f $(GRAPH_INPUT)/kron.sg 
+APP_ARG=-n3
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+############  12G  twitter.sg 
+
+APP_PATH=$(GRAPH_APP)/cc
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.sg 
+APP_ARG=-n16
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/bc
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.sg 
+APP_ARG=-i4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/bfs
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.sg 
+APP_ARG=-n64
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/sssp
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.wsg 
+APP_ARG=-d2
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/pr
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.sg 
+APP_ARG=-i1000 -t1e-4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/tc
+APP_INPUT=-f $(GRAPH_INPUT)/twitter.sg 
+APP_ARG=-n3
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv

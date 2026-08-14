@@ -17,6 +17,11 @@
 #include <cstddef>
 #include <type_traits>
 
+#define MAGIC 0x544C425452414345ULL
+#define END_MAGIC 0x1111425411114345ULL
+#define END_THFINI_MAGIC 0x1111425411114355ULL
+#define END_FINI_MAGIC 0x1111425411114365ULL
+
 static_assert(sizeof(context_instr) == 88, "context_instr size mismatch");
 
 static_assert(offsetof(context_instr, destination_memory) == 0);
@@ -123,11 +128,24 @@ ooo_model_instr tracereader::read_single_instr()
         }
       }
 
-      if (h.magic == 0x1111425411114345ULL) { // END_MAGIC
+      if (h.magic == END_MAGIC) { // END_MAGIC
         std::cerr << "Reached end of trace file cleanly (END_MAGIC)." << std::endl;
         trace_ended = true;
         return ooo_model_instr(cpu, h);
       }
+
+      if (h.magic == END_FINI_MAGIC) { // END_FINI_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_FINI_MAGIC)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, h);
+      }
+
+      if (h.magic == END_THFINI_MAGIC) { // END_THFINI_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_THFINI_MAGIC)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, h);
+      }
+
 
       if(h.magic != MAGIC) {
         read_again++;
@@ -305,6 +323,7 @@ public:
   ooo_model_instr read_helper()
   {
     context_instr trace_read_instr{};
+    int read_again = 0;
     for (;;) {
       size_t read_bytes = fread(&trace_read_instr, sizeof(context_instr), 1, trace_file);
       if (read_bytes != 1) {
@@ -319,15 +338,42 @@ public:
         }
       }
 
-      if (trace_read_instr.magic == 0x1111425411114345ULL) { // END_MAGIC
-        std::cerr << "Reached end of trace file/FIFO cleanly (END_MAGIC)." << std::endl;
+      // if (trace_read_instr.magic == 0x1111425411114345ULL) { // END_MAGIC
+      //   std::cerr << "Reached end of trace file/FIFO cleanly (END_MAGIC)." << std::endl;
+      //   trace_ended = true;
+      //   return ooo_model_instr(cpu, trace_read_instr);
+      // }
+
+      // if (trace_read_instr.magic != 0x544C425452414345ULL) { // MAGIC
+      //   std::cerr << "Bad magic: stream not aligned / stdout contaminated. Read: 0x" 
+      //             << std::hex << trace_read_instr.magic << std::dec << std::endl;
+      //   continue; // Keep reading until correct magic is found
+      // }
+
+      //////////////////////////////////////////////
+
+       if (trace_read_instr.magic == END_MAGIC) { // END_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_MAGIC)." << std::endl;
         trace_ended = true;
         return ooo_model_instr(cpu, trace_read_instr);
       }
 
-      if (trace_read_instr.magic != 0x544C425452414345ULL) { // MAGIC
-        std::cerr << "Bad magic: stream not aligned / stdout contaminated. Read: 0x" 
-                  << std::hex << trace_read_instr.magic << std::dec << std::endl;
+      if (trace_read_instr.magic == END_FINI_MAGIC) { // END_FINI_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_FINI_MAGIC)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, trace_read_instr);
+      }
+
+      if (trace_read_instr.magic == END_THFINI_MAGIC) { // END_THFINI_MAGIC
+        std::cerr << "Reached end of trace file cleanly (END_THFINI_MAGIC)." << std::endl;
+        trace_ended = true;
+        return ooo_model_instr(cpu, trace_read_instr);
+      }
+
+
+      if(trace_read_instr.magic != MAGIC) {
+        read_again++;
+        std::cerr << "Bad magic: stream not aligned / stdout contaminated\nRead again counter, " << read_again << '\n';
         continue; // Keep reading until correct magic is found
       }
 

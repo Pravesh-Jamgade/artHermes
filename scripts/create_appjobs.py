@@ -19,7 +19,6 @@ def parse_files(exp_path, trace_path):
     vars_dict = dict(re.findall(r'^([A-Z0-9_]+)\s*=\s*(.*)$', exp_content, re.M))
     exps = re.findall(r'^([a-z][a-z0-9_]+)\s+(.*)$', exp_content, re.M)
     
-    # print(vars_dict)
     clean_exps = {}
     for name, args in exps:
         for var, val in vars_dict.items():
@@ -56,12 +55,11 @@ def parse_files(exp_path, trace_path):
         final_exps[key] = os.path.expandvars(step1)
 
     for t in traces:
-        for key in ['APP_PATH', 'APP_INPUT', 'APP_PHASE', 'TRACE']:
+        for key in ['APP_PATH', 'APP_INPUT', 'APP_PHASE', 'TRACE', 'APP_ARG']:
             if key in t:
+                # print(key, key in t)
                 step1 = re.sub(r'\$\((.*?)\)', lambda m: os.environ.get(m.group(1), m.group(0)), t[key])
                 t[key] = os.path.normpath(os.path.expandvars(step1))
-
-        ##### Creating new var: APP_TAG an APP_NAME 
 
         # Derive APP_NAME if not present
         if 'APP_NAME' not in t and 'APP_PATH' in t:
@@ -93,12 +91,7 @@ def main():
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Number of parallel slots (N)")
 
     parser.add_argument("-a", "--app-driven", type=int, default=0, help="App driven simulation")
-    # THIS: To enable this change pintool to allow all windows to be traced. In simulator then i can do 
-    # something as simple as Skip 50M in each 100M window by setting knob:partial_window_trace option
     parser.add_argument("-g", "--greedy-tracing", type=int, default=0, help="Greedy tracing")
-    # OR THIS
-    # parser.add_argument("-w", "--trace-windows", type=int, default=0, help="trace n hot windows")
-    # parser.add_argument("--phase-dir", type=str, default=0, help="hot phase file location")
     
     args = parser.parse_args()
 
@@ -117,13 +110,11 @@ def main():
         if not os.path.exists(absolute_dir):
             os.makedirs(absolute_dir)
         
-        # for each exp create a folder with for storing app-driven fifo buffer
         if args.app_driven:
             app_driven_dir = os.path.join(absolute_dir, "temp")
             if not os.path.exists(app_driven_dir):
                 os.makedirs(app_driven_dir)
     
-    # Prepare all tasks
     task_queue = []
     with open(os.path.join(args.outdir, "runjobs.log"), "w") as runjobs:
         for t in traces:
@@ -135,23 +126,21 @@ def main():
 
                 fifo_path = ""
                 if args.app_driven and fifo_dir:
-                    # Create a unique FIFO name for this trace and config
                     fifo_name = f"{t['APP_TAG']}.fifo"
                     fifo_path = os.path.join(fifo_dir, fifo_name)
                     
-                    # Create the FIFO if it doesn't exist
                     if not os.path.exists(fifo_path):
                         os.mkfifo(fifo_path)
                     t['APP_FIFO_PATH'] = fifo_path
 
                 trace_arg = t['APP_FIFO_PATH'] if args.app_driven else t.get('TRACE', '')
 
-                run_name = f'{t['APP_TAG']}_{c_name}' if args.app_driven else f"{t['NAME']}_{c_name}"
+                run_name = f"{t['APP_TAG']}_{c_name}" if args.app_driven else f"{t['NAME']}_{c_name}"
                 log_file = os.path.join(absolute_dir, f"{run_name}.log")
                 sim_path = os.path.join(hermes_home, "bin", args.binary)
                 pin_home = os.environ.get('PIN_ROOT', '.')
                 pin_path = os.path.join(pin_home, "pin")
-                pintool_path = os.path.join(hermes_home, "tracer/obj-intel64/app_hot_tracer.so")
+                pintool_path = os.path.join(hermes_home, "tracer/obj-intel64/app_tracer.so")
                 
                 simcmd = (
                     f"{sim_path} --warmup_instructions={args.warm} "
@@ -163,19 +152,17 @@ def main():
                 if args.app_driven:
                     pincmd = (
                         f"{pin_path} "
-                        f"-t {pintool_path} -s 0 -t {args.warm + args.sim} "
-                        f"-phase_file {t['APP_PHASE']} -o {trace_arg} "
-                        f"-- {t['APP_PATH']} {t['APP_INPUT']}  > /dev/null"
+                        f"-t {pintool_path} -s 0 -t {(args.warm + args.sim)} "
+                        f"-o {trace_arg} "
+                        f"-- {t['APP_PATH']} {t['APP_INPUT']} {t['APP_ARG']} > /dev/null"
                     )
                 task_queue.append({'name': run_name, 'simcmd': simcmd, 'pincmd': pincmd, 'log': log_file})
-                runjobs.write(simcmd+'\n')
-                runjobs.write(pincmd+'\n' if pincmd else '')
+                runjobs.write(simcmd + '\n')
+                runjobs.write(pincmd + '\n' if pincmd else '')
 
     active_tasks = []
     total_tasks = len(task_queue)
     print(f"Total tasks: {total_tasks}  | Slots: {args.jobs}\n")
-
-    # exit(0)
 
     def get_cpu_usage(tasks):
         usage = 0
@@ -189,7 +176,6 @@ def main():
     jobstatus_path = os.path.join(args.outdir, "jobstatus.log")
     with open(jobstatus_path, "w") as jobstatus:
         while task_queue or active_tasks:
-            # Check for finished processes / tasks first to free resources
             for at in active_tasks[:]:
                 running_procs = []
                 finished_procs = []
@@ -200,25 +186,23 @@ def main():
                     else:
                         finished_procs.append((p_info, poll_status))
                 
-                # If some processes ended but others are still running, terminate the running ones
+                # Terminate remaining processes if any companion process finishes/fails
                 if finished_procs and running_procs and not at.get('killed', False):
                     killed_any = False
                     for r_info in running_procs:
                         for f_info, _ in finished_procs:
-                            if {f_info['type'], r_info['type']} == {'pin', 'sim'}:
-                                kill_msg = f"{f_info['type']}->{r_info['type']} kill"
-                                print(f"\n{kill_msg} for task {at['name']}")
-                                jobstatus.write(f"[{kill_msg.upper()}] {at['name']}\n")
-                                jobstatus.flush()
-                                try:
-                                    r_info['proc'].terminate()
-                                except Exception:
-                                    pass
-                                killed_any = True
+                            kill_msg = f"{f_info['type']}->{r_info['type']} kill"
+                            print(f"\n{kill_msg} for task {at['name']}")
+                            jobstatus.write(f"[{kill_msg.upper()}] {at['name']}\n")
+                            jobstatus.flush()
+                            try:
+                                r_info['proc'].terminate()
+                            except Exception:
+                                pass
+                            killed_any = True
                     if killed_any:
                         at['killed'] = True
 
-                # Check if all processes are now done
                 all_done = True
                 failed = False
                 for p_info in at['processes']:
@@ -246,7 +230,6 @@ def main():
                     jobstatus.flush()
                     active_tasks.remove(at)
 
-            # Fill available slots
             while task_queue:
                 next_task = task_queue[0]
                 slots_needed = 2 if (args.app_driven and next_task['pincmd']) else 1
@@ -258,21 +241,20 @@ def main():
                     jobstatus.flush()
                     
                     if args.app_driven and task['pincmd']:
-                        # Separate log for sim and pin
                         log_base, log_ext = os.path.splitext(task['log'])
                         sim_log = f"{log_base}_sim{log_ext}"
                         pin_log = f"{log_base}_pin{log_ext}"
                         
                         f_sim = open(sim_log, "w")
                         f_pin = open(pin_log, "w")
-                        # Launch PIN job first, then SIM job
-                        p_pin = subprocess.Popen(task['pincmd'], shell=True, stdout=f_pin, stderr=subprocess.STDOUT)
+                        
                         p_sim = subprocess.Popen(task['simcmd'], shell=True, stdout=f_sim, stderr=subprocess.STDOUT)
+                        p_pin = subprocess.Popen(task['pincmd'], shell=True, stdout=f_pin, stderr=subprocess.STDOUT)
                         processes = [
                             {'proc': p_pin, 'type': 'pin'},
                             {'proc': p_sim, 'type': 'sim'}
                         ]
-                        files = [f_sim]
+                        files = [f_sim, f_pin]
                     else:
                         f_sim = open(task['log'], "w")
                         p_sim = subprocess.Popen(task['simcmd'], shell=True, stdout=f_sim, stderr=subprocess.STDOUT)
@@ -291,7 +273,7 @@ def main():
                 else:
                     break
 
-            time.sleep(0.5) # Prevent high CPU usage by the manager loop
+            time.sleep(0.5)
 
     print("\nAll experiments completed.")
 

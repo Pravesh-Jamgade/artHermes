@@ -30,6 +30,9 @@ uint64_t window_id = 0;
 int instr_id = 0;
 volatile sig_atomic_t signal_received = 0;
 
+char* re_excute[100] = {nullptr};
+int j = 0;
+
 // uint32_t id = 0;// 1 for store , 2 for load
 struct context_instr {
 
@@ -326,6 +329,35 @@ VOID ThreadFini(THREADID tid, const CONTEXT*, INT32, VOID*)
     fflush(g_out);
     fclose(g_out);
     g_out = nullptr;
+
+    
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        // Fork failed
+        std::cerr << "Fork failed!" << std::endl;
+        _exit(1); 
+    } 
+    else if (pid == 0) {
+
+        fprintf(stderr, "Re-executing the application with execv\n");
+        for(int k=0; k<=j; k++)
+        {
+          fprintf(stderr, "re_excute[%d] = %s \n", k, re_excute[k]);
+        }
+        execv(re_excute[0], re_excute);
+        fprintf(stderr, "execv failed with errno=%d\n", errno);
+
+        // --- CHILD PROCESS ---
+        // Detach from the terminal session group so it runs cleanly
+        setsid(); 
+        
+        // Now execute your clean array
+        execv(re_excute[0], re_excute);
+        
+        // If execv fails inside the child, kill it immediately
+        _exit(127); 
+    }
   }
 
   delete st;
@@ -370,17 +402,39 @@ VOID Fini(INT32 code, VOID* v)
     curr.magic = END_FINI_MAGIC;
     curr.trace_window = 0;
     curr.window_id = window_id;
-    // fprintf(stderr, "Fini: instrCount=%lu\n", ->instrCount);
+    // fprintf(stderr, "Fini: instrCount=%lu\n", st->instrCount);
     fwrite(&curr, sizeof(trace_instr_format_t), 1, g_out);
     fflush(g_out);
     fclose(g_out);
     g_out = nullptr;
+
+    fprintf(stderr, "From FINI: Re-executing the application with execv\n");
+    execv(re_excute[0], re_excute);
   }
 }
 
 int main(int argc, char* argv[])
 {
   if (PIN_Init(argc, argv)) return Usage();
+
+  for(int i=0; i< 100; i++)
+  {
+    re_excute[i] = (char*)malloc(100*sizeof(char));
+  }
+  
+  bool record = false;
+  re_excute[j++] = (char*) "/home/pravesh/pin_kit/pin";
+  for(int i=0; i< argc; i++)
+  {
+    fprintf(stderr, "argv[%d] = %s \n", i, argv[i]);
+    if(strcmp(argv[i], "-t") == 0){
+      record = true;
+    }
+    if(record){
+      re_excute[j++] = argv[i];
+    }
+  }
+  re_excute[j] = nullptr;
 
   PIN_InitLock(&lock);
   tls_key = PIN_CreateThreadDataKey(nullptr);

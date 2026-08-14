@@ -34,5 +34,5 @@ IDEAL_STLB = --ideal_stlb=true
 IDEAL_DRAM_PAGEFAULT = --ideal_dram_page_fault_latency_only=true
 
 normal          $(BASE) $(TRACER)
-ideal_stlb      $(BASE) $(IDEAL_STLB)
-ideal_dram_pf   $(BASE) $(IDEAL_DRAM_PAGEFAULT)
+ideal_stlb      $(BASE) $(IDEAL_STLB) $(TRACER)
+ideal_dram_pf   $(BASE) $(IDEAL_DRAM_PAGEFAULT) $(TRACER)

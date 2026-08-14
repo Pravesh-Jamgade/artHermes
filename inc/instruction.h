@@ -9,6 +9,8 @@
 #include "const.h"
 #include "logging.h"
 #define MAGIC 0x544C425452414345ULL
+#define END_THFINI_MAGIC 0x1111425411114355U
+#define END_FINI_MAGIC 0x1111425411114365ULL
 
 using namespace std;
 
