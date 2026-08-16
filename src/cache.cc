@@ -75,6 +75,9 @@ namespace knob
     extern uint32_t l1d_priority_rq_priority_type;
     extern uint32_t l2c_priority_rq_priority_type;
     extern uint32_t llc_priority_rq_priority_type;
+    extern uint32_t stlb_set;
+    extern uint32_t stlb_way;
+    extern uint32_t stlb_latency;
 }
 
 uint64_t l2pf_access = 0;
@@ -101,13 +104,13 @@ void print_cache_config()
         << "dtlb_priority_rq " << +knob::enable_dtlb_priority_rq << endl
         << "dtlb_priority_rq_type " << priority_name_string[knob::dtlb_priority_rq_priority_type] << endl
         << endl
-        << "stlb_set " << STLB_SET << endl
-        << "stlb_way " << STLB_WAY << endl
+        << "stlb_set " << knob::stlb_set << endl
+        << "stlb_way " << knob::stlb_way << endl
         << "stlb_rq_size " << STLB_RQ_SIZE << endl
         << "stlb_wq_size " << STLB_WQ_SIZE << endl
         << "stlb_pq_size " << STLB_PQ_SIZE << endl
         << "stlb_mshr_size " << STLB_MSHR_SIZE << endl
-        << "stlb_latency " << STLB_LATENCY << endl
+        << "stlb_latency " << knob::stlb_latency << endl
         << "stlb_priority_rq " << +knob::enable_stlb_priority_rq << endl
         << "stlb_priority_rq_type " << priority_name_string[knob::stlb_priority_rq_priority_type] << endl
         << endl
@@ -3239,5 +3242,29 @@ void CACHE::broadcast_acc(uint32_t acc_level)
         case IS_L1D:    return l1d_prefetcher_broadcast_acc(acc_level);
         case IS_L2C:    return l2c_prefetcher_broadcast_acc(acc_level);
         case IS_LLC:    return llc_prefetcher_broadcast_acc(acc_level);
+    }
+}
+
+void CACHE::reconfigure(uint32_t sets, uint32_t ways, uint32_t latency)
+{
+    // Deallocate existing block array
+    for (uint32_t i = 0; i < NUM_SET; i++) {
+        delete[] block[i];
+    }
+    delete[] block;
+
+    // Update parameters
+    NUM_SET = sets;
+    NUM_WAY = ways;
+    NUM_LINE = sets * ways;
+    LATENCY = latency;
+
+    // Reallocate block array
+    block = new BLOCK* [NUM_SET];
+    for (uint32_t i = 0; i < NUM_SET; i++) {
+        block[i] = new BLOCK[NUM_WAY];
+        for (uint32_t j = 0; j < NUM_WAY; j++) {
+            block[i][j].lru = j;
+        }
     }
 }

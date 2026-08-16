@@ -24,4 +24,7 @@ std::vector<float> get_array_float(const char *str);
 namespace knob
 {
     extern std::string footprint_track_type;
+    extern uint32_t stlb_set;
+    extern uint32_t stlb_way;
+    extern uint32_t stlb_latency;
 }

@@ -21,7 +21,8 @@ class CACHE : public MEMORY {
   public:
     uint32_t cpu;
     const string NAME;
-    const uint32_t NUM_SET, NUM_WAY, NUM_LINE, WQ_SIZE, RQ_SIZE, PQ_SIZE, MSHR_SIZE;
+    uint32_t NUM_SET, NUM_WAY, NUM_LINE;
+    const uint32_t WQ_SIZE, RQ_SIZE, PQ_SIZE, MSHR_SIZE;
     uint32_t LATENCY;
     BLOCK **block;
     int fill_level;
@@ -380,6 +381,7 @@ class CACHE : public MEMORY {
         l1d_prefetcher_broadcast_acc(uint32_t bw_level),
         l2c_prefetcher_broadcast_acc(uint32_t bw_level),
         llc_prefetcher_broadcast_acc(uint32_t bw_level);
+    void reconfigure(uint32_t sets, uint32_t ways, uint32_t latency);
 };
 
 void print_cache_config();

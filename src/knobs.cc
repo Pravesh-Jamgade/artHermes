@@ -14,6 +14,9 @@ namespace knob
 {
 	uint64_t warmup_instructions = 0;
 	string footprint_track_type = "LOAD";
+	uint32_t stlb_set = STLB_SET;
+	uint32_t stlb_way = STLB_WAY;
+	uint32_t stlb_latency = STLB_LATENCY;
 	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
@@ -547,6 +550,18 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
     else if (MATCH("", "footprint_track_type"))
     {
 		knob::footprint_track_type = string(value);
+    }
+    else if (MATCH("", "stlb_set"))
+    {
+		knob::stlb_set = atoi(value);
+    }
+    else if (MATCH("", "stlb_way"))
+    {
+		knob::stlb_way = atoi(value);
+    }
+    else if (MATCH("", "stlb_latency"))
+    {
+		knob::stlb_latency = atoi(value);
     }
     else if (MATCH("", "simulation_instructions"))
     {

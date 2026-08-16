@@ -89,6 +89,9 @@ namespace knob
     extern bool enable_app_driven;
     extern bool enable_libc_buffered;
     extern bool enable_shmem_buffered;
+    extern uint32_t stlb_set;
+    extern uint32_t stlb_way;
+    extern uint32_t stlb_latency;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -1110,7 +1113,7 @@ void finish_warmup()
     for (uint32_t i=0; i<NUM_CPUS; i++) {
         ooo_cpu[i].ITLB.LATENCY = ITLB_LATENCY;
         ooo_cpu[i].DTLB.LATENCY = DTLB_LATENCY;
-        ooo_cpu[i].STLB.LATENCY = STLB_LATENCY;
+        ooo_cpu[i].STLB.LATENCY = knob::stlb_latency;
         ooo_cpu[i].L1I.LATENCY  = L1I_LATENCY;
         ooo_cpu[i].L1D.LATENCY  = L1D_LATENCY;
         ooo_cpu[i].L2C.LATENCY  = L2C_LATENCY;
@@ -1898,6 +1901,7 @@ int main(int argc, char** argv)
 
         ooo_cpu[i].STLB.cpu = i;
         ooo_cpu[i].STLB.cache_type = IS_STLB;
+        ooo_cpu[i].STLB.reconfigure(knob::stlb_set, knob::stlb_way, knob::stlb_latency);
         ooo_cpu[i].STLB.create_rq();
         ooo_cpu[i].STLB.MAX_READ = 1;
         ooo_cpu[i].STLB.fill_level = FILL_L2;
