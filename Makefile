@@ -8,7 +8,8 @@ inc = inc
 
 debug = 1
 
-CFlags = -Wall -O3 -std=c++20 -D_DEFAULT_SOURCE -I./libbf/
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+CFlags = -Wall -O3 -std=c++20 -D_DEFAULT_SOURCE -I./libbf/ -DGIT_COMMIT=\"$(GIT_COMMIT)\"
 LDFlags = ./libbf/build/lib/libbf.a -lz
 libs = 
 libDir =

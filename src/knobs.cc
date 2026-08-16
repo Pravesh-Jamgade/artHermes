@@ -13,7 +13,7 @@ using namespace std;
 namespace knob
 {
 	uint64_t warmup_instructions = 0;
-	string footprint_track_type = "LOAD";
+	string footprint_track_type = "TRANSLATION";
 	uint32_t stlb_set = STLB_SET;
 	uint32_t stlb_way = STLB_WAY;
 	uint32_t stlb_latency = STLB_LATENCY;

@@ -1764,6 +1764,9 @@ int main(int argc, char** argv)
 
     cout << "**********************************************************" << endl
          << "   ChampSim Simulator. Mainline Checkout: Oct 18, 2021" << endl
+#ifdef GIT_COMMIT
+         << "          Git commit: " << GIT_COMMIT << endl
+#endif
          << "          Last compiled: " << __DATE__ << " " << __TIME__ << endl
          << "**********************************************************" << endl;
 
