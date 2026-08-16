@@ -605,7 +605,7 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         << "Core_" << cpu << "_" << cache->NAME << "_eviction_all_reuse_avg " << (float)cache->stats.eviction.all_reuse_total / cache->stats.eviction.atleast_one_reuse << endl
         ;
     
-    cout << '\n'
+    cout << '\n';
 
     if (cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
         // Helper lambda for printing 2D FootprintMetrics (rows = footprint size 0..8, cols = LRU pos 0..NUM_WAY-1)

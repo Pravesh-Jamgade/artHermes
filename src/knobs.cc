@@ -17,7 +17,7 @@ namespace knob
 	uint32_t stlb_set = STLB_SET;
 	uint32_t stlb_way = STLB_WAY;
 	uint32_t stlb_latency = STLB_LATENCY;
-	string max_lru_before_eviction_block_type = "NONE";
+	string max_lru_before_eviction_block_type = "TRANSLATION";
 	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
