@@ -47,6 +47,7 @@ class BLOCK {
     uint32_t reuse_frontal_dorsal[NUM_PARTITION_TYPES];
     uint32_t doa_pred_bit;   // Deadblock pred: LLC perceptron prediction (0=unset, 1 doa)
     uint32_t usage;          // Deadblock pred: hit counter (0 on fill, incremented on each hit)
+    uint32_t max_lru_before_eviction;
 
     struct FootprintMetadata {
         uint8_t footprint;
@@ -82,6 +83,7 @@ class BLOCK {
         lru = 0;
         doa_pred_bit = 0; // Deadblock pred
         usage = 0;         // Deadblock pred
+        max_lru_before_eviction = 0;
 
         footprint.footprint = 0;
         footprint.max_lru_footprint_change = 0;
@@ -114,6 +116,7 @@ class BLOCK {
         critical_actual = false;
         critical_pred = false;
         fill_ip = 0xdeadbeef;
+        max_lru_before_eviction = 0;
         footprint.footprint = 0;
         footprint.max_lru_footprint_change = 0;
         footprint.footprint_changed = false;

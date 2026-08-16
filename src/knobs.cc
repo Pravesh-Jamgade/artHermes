@@ -17,6 +17,7 @@ namespace knob
 	uint32_t stlb_set = STLB_SET;
 	uint32_t stlb_way = STLB_WAY;
 	uint32_t stlb_latency = STLB_LATENCY;
+	string max_lru_before_eviction_block_type = "NONE";
 	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
@@ -562,6 +563,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
     else if (MATCH("", "stlb_latency"))
     {
 		knob::stlb_latency = atoi(value);
+    }
+    else if (MATCH("", "max_lru_before_eviction_block_type"))
+    {
+		knob::max_lru_before_eviction_block_type = string(value);
     }
     else if (MATCH("", "simulation_instructions"))
     {

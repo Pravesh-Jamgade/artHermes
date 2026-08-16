@@ -27,4 +27,5 @@ namespace knob
     extern uint32_t stlb_set;
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
+    extern std::string max_lru_before_eviction_block_type;
 }

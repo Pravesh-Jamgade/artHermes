@@ -122,6 +122,8 @@ class CACHE : public MEMORY {
             uint64_t data_load_miss_promoted_pseudo_hit;
         } pseudo_perfect;
 
+        uint64_t max_lru_before_eviction_hist[128];
+
     } stats;
     std::unordered_map<uint64_t, uint64_t> dependent_map;
 
@@ -275,6 +277,9 @@ class CACHE : public MEMORY {
 
         for(uint32_t index = 0; index < ROB_SIZE; ++index)
             missing_load_rob_pos_hist[index] = 0;
+
+        for(uint32_t index = 0; index < 128; ++index)
+            stats.max_lru_before_eviction_hist[index] = 0;
     }
 
     void init_rand_engine(uint64_t seed, float prob)
@@ -358,6 +363,7 @@ class CACHE : public MEMORY {
 
     // @RBERA new functions
     void track_stats_from_victim(uint32_t set, uint32_t way);
+    void track_max_lru_on_hit(uint32_t set, uint32_t way);
     hit_where_t assign_hit_where(uint8_t cache_type, uint32_t where_in_cache);
     void send_signal_to_core(uint32_t cpu, PACKET packet);
 

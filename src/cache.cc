@@ -78,6 +78,7 @@ namespace knob
     extern uint32_t stlb_set;
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
+    extern string   max_lru_before_eviction_block_type;
 }
 
 uint64_t l2pf_access = 0;
@@ -1212,6 +1213,8 @@ void CACHE::handle_read()
                     }
                 }
 
+                track_max_lru_on_hit(set, way);
+
                 // update replacement policy
                 if (cache_type == IS_LLC) 
                 {
@@ -1630,6 +1633,8 @@ void CACHE::handle_prefetch()
                 }
 
                 PQ.entry[index].hit_where = assign_hit_where(cache_type, 0); // prefetch hit
+
+                track_max_lru_on_hit(set, way);
 
                 // update replacement policy
                 if (cache_type == IS_LLC) 
@@ -2863,6 +2868,29 @@ void CACHE::prefetcher_feedback(uint64_t &pref_gen, uint64_t &pref_fill, uint64_
     pref_late = pf_late;
 }
 
+void CACHE::track_max_lru_on_hit(uint32_t set, uint32_t way)
+{
+    bool track_max_lru = false;
+    uint8_t pkt_type = block[set][way].footprint.packet_type;
+    if (knob::max_lru_before_eviction_block_type == "ALL") {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "LOAD" && pkt_type == LOAD) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "PREFETCH" && pkt_type == PREFETCH) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "TRANSLATION" && pkt_type == TRANSLATION) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "WRITEBACK" && pkt_type == WRITEBACK) {
+        track_max_lru = true;
+    }
+
+    if (track_max_lru) {
+        if (block[set][way].lru > block[set][way].max_lru_before_eviction) {
+            block[set][way].max_lru_before_eviction = block[set][way].lru;
+        }
+    }
+}
+
 void CACHE::track_stats_from_victim(uint32_t set, uint32_t way)
 {
     stats.eviction.total++;
@@ -2893,6 +2921,27 @@ void CACHE::track_stats_from_victim(uint32_t set, uint32_t way)
                     }
                 }
             }
+        }
+    }
+
+    bool track_max_lru = false;
+    uint8_t pkt_type = block[set][way].footprint.packet_type;
+    if (knob::max_lru_before_eviction_block_type == "ALL") {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "LOAD" && pkt_type == LOAD) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "PREFETCH" && pkt_type == PREFETCH) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "TRANSLATION" && pkt_type == TRANSLATION) {
+        track_max_lru = true;
+    } else if (knob::max_lru_before_eviction_block_type == "WRITEBACK" && pkt_type == WRITEBACK) {
+        track_max_lru = true;
+    }
+
+    if (track_max_lru) {
+        uint32_t max_lru = block[set][way].max_lru_before_eviction;
+        if (max_lru < 128) {
+            stats.max_lru_before_eviction_hist[max_lru]++;
         }
     }
 

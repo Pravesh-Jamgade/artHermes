@@ -92,6 +92,7 @@ namespace knob
     extern uint32_t stlb_set;
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
+    extern string   max_lru_before_eviction_block_type;
 }
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -603,8 +604,10 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         << "Core_" << cpu << "_" << cache->NAME << "_eviction_all_reuse_min " << cache->stats.eviction.all_reuse_min << endl
         << "Core_" << cpu << "_" << cache->NAME << "_eviction_all_reuse_avg " << (float)cache->stats.eviction.all_reuse_total / cache->stats.eviction.atleast_one_reuse << endl
         ;
+    
+    cout << '\n'
 
-    if (cache->cache_type == IS_L2C) {
+    if (cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
         // Helper lambda for printing 2D FootprintMetrics (rows = footprint size 0..8, cols = LRU pos 0..NUM_WAY-1)
         auto print_2d_metrics = [&](const string &metric_name, const decltype(cache->stats.footprint.general) &m) {
             cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_max_" << metric_name << ",size";
@@ -697,6 +700,19 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         // for (uint32_t lvl = 0; lvl < 5; lvl++) {
         //     print_reuse_2d("trans_lvl_" + to_string(lvl) + "_entry_reuse", cache->stats.footprint.trans_level_entry_reuse_hist[lvl]);
         // }
+    }
+
+    if (knob::max_lru_before_eviction_block_type != "NONE") {
+        cout << "Core_" << cpu << "_" << cache->NAME << "_eviction_max_lru_before_eviction_hist";
+        for (uint32_t i = 0; i < cache->NUM_WAY; i++) {
+            cout << "," << i;
+        }
+        cout << endl;
+        cout << "Core_" << cpu << "_" << cache->NAME;
+        for (uint32_t i = 0; i < cache->NUM_WAY; i++) {
+            cout << "," << cache->stats.max_lru_before_eviction_hist[i];
+        }
+        cout << endl << endl;
     }
     
 #ifdef PRINT_AUX_STATS
