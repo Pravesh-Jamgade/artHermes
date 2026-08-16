@@ -14,6 +14,18 @@ NAME=bark.cpp-bark-small.coarse_token_gen.5
 TRACE=$(HERMES_TRACE)/bark.cpp-bark-small.coarse_token_gen.5.champsimtrace.gz
 KNOBS=""
 
+NAME=biogpt.cpp-ggml-model-tocilizumab.3
+TRACE=$(HERMES_TRACE)/biogpt.cpp-ggml-model-tocilizumab.3.champsimtrace.gz
+KNOBS=""
+
+NAME=biogpt.cpp-ggml-model-tocilizumab.2
+TRACE=$(HERMES_TRACE)/biogpt.cpp-ggml-model-tocilizumab.2.champsimtrace.gz
+KNOBS=""
+
+NAME=biogpt.cpp-ggml-model-tocilizumab.1
+TRACE=$(HERMES_TRACE)/biogpt.cpp-ggml-model-tocilizumab.1.champsimtrace.gz
+KNOBS=""
+
 NAME=clip_trace_1.champsimtrace-024.gz
 TRACE=$(HERMES_TRACE)/clip_trace_1.champsimtrace-024.gz
 KNOBS=""
@@ -61,6 +73,12 @@ KNOBS=""
 NAME=rwkv_trace_3.champsimtrace-004.gz
 TRACE=$(HERMES_TRACE)/rwkv_trace_3.champsimtrace-004.gz.champsimtrace.gz
 KNOBS=""
+NAME=rwkv_trace_2.champsimtrace-011.gz
+TRACE=$(HERMES_TRACE)/rwkv_trace_2.champsimtrace-011.gz.champsimtrace.gz
+KNOBS=""
+NAME=rwkv_trace_1.champsimtrace-015.gz
+TRACE=$(HERMES_TRACE)/rwkv_trace_1.champsimtrace-015.gz.champsimtrace.gz
+KNOBS=""
 
 NAME=stable-diffusion.cpp-sd-v1-4.ckpt.1
 TRACE=$(HERMES_TRACE)/stable-diffusion.cpp-sd-v1-4.ckpt.1.champsimtrace.gz
@@ -72,6 +90,10 @@ KNOBS=""
 
 NAME=stable-diffusion.cpp-v1-5-pruned-emaonly.2
 TRACE=$(HERMES_TRACE)/stable-diffusion.cpp-v1-5-pruned-emaonly.2.champsimtrace.gz
+KNOBS=""
+
+NAME=stable-diffusion.cpp-v2-1_768-nonema-pruned.1
+TRACE=$(HERMES_TRACE)/stable-diffusion.cpp-v2-1_768-nonema-pruned.1.champsimtrace.gz
 KNOBS=""
 
 NAME=stable-diffusion.cpp-v2-1_768-nonema-pruned.2
