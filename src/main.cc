@@ -2145,9 +2145,27 @@ int main(int argc, char** argv)
                 }
                 float heartbeat_ipc = (1.0*ooo_cpu[i].num_retired - ooo_cpu[i].last_sim_instr) / (current_core_cycle[i] - ooo_cpu[i].last_sim_cycle);
 
-                cout << "Heartbeat CPU " << i << " instructions: " << ooo_cpu[i].num_retired << " cycles: " << current_core_cycle[i];
-                cout << " heartbeat IPC: " << FIXED_FLOAT(heartbeat_ipc) << " cumulative IPC: " << FIXED_FLOAT(cumulative_ipc); 
-                cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
+                uint64_t stlb_access = 0, stlb_miss = 0;
+                uint64_t l2_access = 0, l2_miss = 0;
+                uint64_t llc_access = 0, llc_miss = 0;
+                for (uint32_t t = 0; t < NUM_TYPES; t++) {
+                    stlb_access += ooo_cpu[i].STLB.sim_access[i][t];
+                    stlb_miss += ooo_cpu[i].STLB.sim_miss[i][t];
+                    l2_access += ooo_cpu[i].L2C.sim_access[i][t];
+                    l2_miss += ooo_cpu[i].L2C.sim_miss[i][t];
+                    llc_access += uncore.LLC.sim_access[i][t];
+                    llc_miss += uncore.LLC.sim_miss[i][t];
+                }
+                float stlb_miss_rate = stlb_access ? (100.0f * stlb_miss / stlb_access) : 0.0f;
+                float l2_miss_rate = l2_access ? (100.0f * l2_miss / l2_access) : 0.0f;
+                float llc_miss_rate = llc_access ? (100.0f * llc_miss / llc_access) : 0.0f;
+
+                cout << "HB CPU " << i << " I: " << ooo_cpu[i].num_retired << " Cy: " << current_core_cycle[i];
+                cout << " HB IPC: " << FIXED_FLOAT(heartbeat_ipc) << " cum. IPC: " << FIXED_FLOAT(cumulative_ipc); 
+                cout << " STLB m.r.: " << FIXED_FLOAT(stlb_miss_rate) << "%"
+                     << " L2C m.r.: " << FIXED_FLOAT(l2_miss_rate) << "%"
+                     << " LLC m.r.: " << FIXED_FLOAT(llc_miss_rate) << "%";
+                cout << " (time: " << elapsed_hour << " h " << elapsed_minute << " m " << elapsed_second << " s) " << endl;
                 ooo_cpu[i].next_print_instruction += STAT_PRINTING_PERIOD;
 
                 ooo_cpu[i].last_sim_instr = ooo_cpu[i].num_retired;
