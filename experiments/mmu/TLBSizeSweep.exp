@@ -32,8 +32,8 @@ HERMES_P = --config=$(HERMES_HOME)/config/hermes_base.ini --ddrp_req_latency=18
 tlb             $(BASE) --stlb_set=128 --stlb_way=12 --stlb_latency=8
 tlb2x           $(BASE) --stlb_set=256 --stlb_way=12 --stlb_latency=12
 tlb3x           $(BASE) --stlb_set=512 --stlb_way=12 --stlb_latency=18
-tlb3x           $(BASE) --stlb_set=1024 --stlb_way=12 --stlb_latency=27
-tlb3x           $(BASE) --stlb_set=2048 --stlb_way=12 --stlb_latency=41 
+tlb4x           $(BASE) --stlb_set=1024 --stlb_way=12 --stlb_latency=27
+tlb5x           $(BASE) --stlb_set=2048 --stlb_way=12 --stlb_latency=41 
 
 
 
