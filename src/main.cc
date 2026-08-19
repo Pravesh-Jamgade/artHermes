@@ -1074,7 +1074,10 @@ void print_addr_translation_stats(uint32_t cpu)
         core_minor_fault += minor_fault[tid];
     }
     cout << "Core_" << cpu << "_major_fault " << core_major_fault << endl
-        << "Core_" << cpu << "_minor_fault " << core_minor_fault << endl
+        << "Core_" << cpu << "_minor_fault " << core_minor_fault << endl;
+    cout << "Core_" << cpu << "_page_fault_fetch_stall_cycles " << ooo_cpu[cpu].total_page_fault_fetch_stall_cycles << endl
+        << "Core_" << cpu << "_page_fault_dram_stall_cycles " << ooo_cpu[cpu].total_page_fault_dram_stall_cycles << endl
+        << "Core_" << cpu << "_page_fault_dram_count " << ooo_cpu[cpu].total_page_fault_dram_count << endl
         << endl;
 }
 

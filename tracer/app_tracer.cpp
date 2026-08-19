@@ -69,12 +69,14 @@ struct thread_state_t {
   bool should_write = 0;
   uint64_t instrCount = 0;
   trace_instr_format_t curr{};
+  bool in_spinlock = false;
   // std::ofstream outfile;
 };
 
 static TLS_KEY tls_key;
 static PIN_LOCK lock;
 static THREADID tracked_tid = INVALID_THREADID;
+static uint64_t total_spin_locks_encountered = 0;
 
 KNOB<UINT64> KnobSkipInstructions (KNOB_MODE_WRITEONCE, "pintool", "s", "0", "skip");
 KNOB<UINT64> KnobTraceInstructions(KNOB_MODE_WRITEONCE, "pintool", "t", "1000000", "trace");
@@ -156,6 +158,8 @@ BOOL ShouldWrite(THREADID tid)
   if (tid != tracked_tid) return FALSE;
   auto* st = GetState(tid);
   if (!st) return FALSE;
+
+  if (st->in_spinlock) return FALSE;
 
   ++st->instrCount;
   // const uint64_t n = st->instrCount;
@@ -248,6 +252,44 @@ VOID AddMemWrite(THREADID tid, ADDRINT ea)
                        static_cast<uint64_t>(ea));
 }
 
+VOID OnSpinLockEnter(THREADID tid)
+{
+  if (tid != tracked_tid) return;
+  auto* st = GetState(tid);
+  if (st) {
+    st->in_spinlock = true;
+    total_spin_locks_encountered++;
+  }
+}
+
+VOID OnSpinLockExit(THREADID tid)
+{
+  if (tid != tracked_tid) return;
+  auto* st = GetState(tid);
+  if (st) {
+    st->in_spinlock = false;
+  }
+}
+
+VOID Routine(RTN rtn, VOID* v)
+{
+  std::string name = RTN_Name(rtn);
+  if (name == "pthread_spin_lock" || name == "__pthread_spin_lock" || name == "_pthread_spin_lock")
+  {
+    RTN_Open(rtn);
+    RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)OnSpinLockEnter,
+                   IARG_THREAD_ID, IARG_END);
+    RTN_Close(rtn);
+  }
+  else if (name == "pthread_spin_unlock" || name == "__pthread_spin_unlock" || name == "_pthread_spin_unlock")
+  {
+    RTN_Open(rtn);
+    RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)OnSpinLockExit,
+                   IARG_THREAD_ID, IARG_END);
+    RTN_Close(rtn);
+  }
+}
+
 // ---------- Instrumentation ----------
 VOID Instruction(INS ins, VOID*)
 {
@@ -321,7 +363,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT*, INT32, VOID*)
     st->curr.trace_window = 0;
     st->curr.window_id = window_id;
 
-    fprintf(stderr, "ThreadFini: instrCount=%lu, Tracked Thraed Id=%d\n", st->instrCount, tid);
+    fprintf(stderr, "ThreadFini: instrCount=%lu, Tracked Thraed Id=%d, total_spin_locks_encountered=%lu\n", st->instrCount, tid, total_spin_locks_encountered);
     fwrite(&st->curr, sizeof(trace_instr_format_t), 1, g_out);
     fflush(g_out);
     fclose(g_out);
@@ -364,6 +406,7 @@ signal_received = signum;
 
 VOID Fini(INT32 code, VOID* v)
 {
+  fprintf(stderr, "Fini: total_spin_locks_encountered=%lu\n", total_spin_locks_encountered);
   if (g_out) {
     trace_instr_format_t curr{};
     curr.record_size = sizeof(trace_instr_format_t);
@@ -380,6 +423,7 @@ VOID Fini(INT32 code, VOID* v)
 
 int main(int argc, char* argv[])
 {
+  PIN_InitSymbols();
   if (PIN_Init(argc, argv)) return Usage();
 
   PIN_InitLock(&lock);
@@ -391,6 +435,7 @@ int main(int argc, char* argv[])
   setvbuf(g_out, nullptr, _IOFBF, 1 << 20); // 1MB buffer
   
   INS_AddInstrumentFunction(Instruction, nullptr);
+  RTN_AddInstrumentFunction(Routine, nullptr);
   PIN_AddThreadStartFunction(ThreadStart, nullptr);
   PIN_AddThreadFiniFunction(ThreadFini, nullptr);
   PIN_AddFiniFunction(Fini, nullptr);

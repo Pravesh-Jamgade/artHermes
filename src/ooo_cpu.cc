@@ -180,6 +180,7 @@ void O3_CPU::read_from_trace()
                     if(stall_quant[j].empty() == false)
                     {
                         stall_by_page_fault[j] = current_core_cycle[cpu] + stall_quant[j].front();
+                        total_page_fault_fetch_stall_cycles += stall_quant[j].front();
                         stall_quant[j].pop();
                         continue;
                     }
@@ -226,6 +227,7 @@ void O3_CPU::read_from_trace()
                 if(stall_quant[0].empty() == false)
                 {
                     stall_by_page_fault[0] = current_core_cycle[cpu] + stall_quant[0].front();
+                    total_page_fault_fetch_stall_cycles += stall_quant[0].front();
                     stall_quant[0].pop();
                     continue_reading = 0;
                     break;

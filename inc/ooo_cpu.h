@@ -101,6 +101,9 @@ public:
 
     int mispredict_stalling_thread = -1;
     uint64_t instr_read = 0;
+    uint64_t total_page_fault_fetch_stall_cycles;
+    uint64_t total_page_fault_dram_stall_cycles;
+    uint64_t total_page_fault_dram_count;
 
     // instruction
     input_instr next_instr;
@@ -257,6 +260,9 @@ public:
 
         // instruction
         instr_unique_id = 0;
+        total_page_fault_fetch_stall_cycles = 0;
+        total_page_fault_dram_stall_cycles = 0;
+        total_page_fault_dram_count = 0;
         completed_executions = 0;
         begin_sim_cycle = 0;
         begin_sim_instr = 0;

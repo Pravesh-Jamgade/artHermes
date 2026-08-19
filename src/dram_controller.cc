@@ -219,6 +219,10 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
         }
 
         LATENCY = 0;
+        if (is_pf) {
+            ooo_cpu[op_cpu].total_page_fault_dram_count++;
+            ooo_cpu[op_cpu].total_page_fault_dram_stall_cycles += PAGE_FAULT_LATENCY;
+        }
         
         uint32_t stall_id = queue->entry[index].asid[1] % knob::num_threads_per_core;
         if(queue->entry[index].from_ptw)
