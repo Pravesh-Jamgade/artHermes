@@ -398,6 +398,8 @@ void O3_CPU::read_from_trace()
             arch_instr.is_load = 1;
         if (num_mem_dest > 0)
             arch_instr.is_store = 1;
+        arch_instr.load_chain_len = arch_instr.is_load ? 1 : 0;
+        arch_instr.dist_from_load = arch_instr.is_load ? 0 : -1;
 
         // determine branch type
         if(!reads_sp && !reads_flags && writes_ip && !reads_other)
@@ -1251,6 +1253,25 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
             ROB.entry[current].num_reg_dependent++;
             ROB.entry[current].reg_RAW_checked[source_index] = 1;
 
+            if (ROB.entry[current].is_load) {
+                if (ROB.entry[prior].is_load) {
+                    ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len + 1);
+                } else if (ROB.entry[prior].load_chain_len > 0) {
+                    ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len + 1);
+                }
+            } else {
+                ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len);
+            }
+
+            int32_t prior_dist = ROB.entry[prior].is_load ? 0 : ROB.entry[prior].dist_from_load;
+            if (ROB.entry[prior].is_load || ROB.entry[prior].dist_from_load >= 0) {
+                ROB.entry[current].dist_from_load = std::max(ROB.entry[current].dist_from_load, prior_dist + 1);
+            }
+
+            if (warmup_complete[cpu] && ROB.entry[prior].is_load && ROB.entry[current].is_store) {
+                count_dep_reg_load_store++;
+            }
+
             DP (if(warmup_complete[cpu]) {
             cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[current].instr_id << " is_memory: " << +ROB.entry[current].is_memory;
             cout << " RAW reg_index: " << +ROB.entry[current].source_registers[source_index];
@@ -1703,6 +1724,15 @@ void O3_CPU::mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_
             ROB.entry[prior].is_producer = 1;
             LQ.entry[lq_index].producer_id = ROB.entry[prior].instr_id; 
             LQ.entry[lq_index].translated = INFLIGHT;
+
+            if (warmup_complete[cpu] && ROB.entry[prior].is_store && ROB.entry[current].is_load) {
+                count_dep_mem_store_load++;
+            }
+
+            int32_t prior_dist = ROB.entry[prior].is_load ? 0 : ROB.entry[prior].dist_from_load;
+            if (ROB.entry[prior].is_load || ROB.entry[prior].dist_from_load >= 0) {
+                ROB.entry[current].dist_from_load = std::max(ROB.entry[current].dist_from_load, prior_dist + 1);
+            }
 
             DP (if(warmup_complete[cpu]) {
             cout << "[LQ] " << __func__ << " RAW producer instr_id: " << ROB.entry[prior].instr_id << " consumer_id: " << ROB.entry[current].instr_id << " lq_index: " << lq_index;
@@ -2678,6 +2708,36 @@ void O3_CPU::retire_rob()
 
         int thread_id = ROB.entry[ROB.head].asid[1] % knob::num_threads_per_core;
 
+        if (warmup_complete[cpu]) {
+            if (ROB.entry[ROB.head].is_load) {
+                num_retired_loads++;
+                uint32_t len = ROB.entry[ROB.head].load_chain_len;
+                if (len >= 128) len = 127;
+                load_chain_len_hist[len]++;
+
+                bool is_leaf = ROB.entry[ROB.head].registers_instrs_depend_on_me.empty() && 
+                              ROB.entry[ROB.head].memory_instrs_depend_on_me.empty();
+                if (is_leaf && ROB.entry[ROB.head].dist_from_load > 0) {
+                    num_load_load_chains++;
+                    uint32_t dist_len = ROB.entry[ROB.head].dist_from_load;
+                    if (dist_len >= 128) dist_len = 127;
+                    load_load_chain_hist[dist_len]++;
+                }
+            }
+            if (ROB.entry[ROB.head].is_store) {
+                num_retired_stores++;
+                bool is_leaf = ROB.entry[ROB.head].registers_instrs_depend_on_me.empty() && 
+                              ROB.entry[ROB.head].memory_instrs_depend_on_me.empty();
+                if (is_leaf && ROB.entry[ROB.head].dist_from_load > 0) {
+                    num_load_store_chains++;
+                    uint32_t dist_len = ROB.entry[ROB.head].dist_from_load;
+                    if (dist_len >= 128) dist_len = 127;
+                    load_store_chain_hist[dist_len]++;
+                }
+            }
+            if (ROB.entry[ROB.head].is_branch) num_retired_branches++;
+        }
+
         ooo_model_instr empty_entry;
         ROB.entry[ROB.head] = empty_entry;
 	
@@ -3129,34 +3189,19 @@ void O3_CPU::accumulate_rob_load_latencies(ooo_model_instr *entry)
         return;
     }
 
-    uint64_t translation_not_blocked = 0;
     uint64_t translation_blocked = 0;
-    
-    if (T >= D) {
-        uint64_t min_T_H = std::min(T, H);
-        if (min_T_H >= D) {
-            translation_not_blocked = min_T_H - D;
-        }
-        if (T >= H) {
-            translation_blocked = T - H;
-        }
+    if (T > H) {
+        translation_blocked = T - H;
+        stats.rob_load_waiting.total_translation_stall_cycles += translation_blocked;
+        stats.rob_load_waiting.total_translation_blocked_instances++;
     }
 
-    uint64_t data_not_blocked = 0;
     uint64_t data_blocked = 0;
-    
-    if (F >= T) {
-        uint64_t min_F_H = std::min(F, H);
-        uint64_t max_T_min_F_H = std::max(T, min_F_H);
-        if (max_T_min_F_H >= T) {
-            data_not_blocked = max_T_min_F_H - T;
-        }
-        
-        uint64_t max_F_H = std::max(F, H);
-        uint64_t max_T_H = std::max(T, H);
-        if (max_F_H >= max_T_H) {
-            data_blocked = max_F_H - max_T_H;
-        }
+    uint64_t max_T_H = std::max(T, H);
+    if (F > max_T_H) {
+        data_blocked = F - max_T_H;
+        stats.rob_load_waiting.total_data_stall_cycles += data_blocked;
+        stats.rob_load_waiting.total_data_blocked_instances++;
     }
 
     uint64_t rob_latency = 0;
@@ -3166,10 +3211,6 @@ void O3_CPU::accumulate_rob_load_latencies(ooo_model_instr *entry)
 
     stats.rob_load_waiting.total_retired_loads++;
     stats.rob_load_waiting.total_rob_latency += rob_latency;
-    stats.rob_load_waiting.translation_not_blocked += translation_not_blocked;
-    stats.rob_load_waiting.translation_blocked += translation_blocked;
-    stats.rob_load_waiting.data_not_blocked += data_not_blocked;
-    stats.rob_load_waiting.data_blocked += data_blocked;
 
     rob_load_waiting_translation_blocked_hist.update(translation_blocked);
     rob_load_waiting_data_blocked_hist.update(data_blocked);

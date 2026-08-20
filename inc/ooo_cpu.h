@@ -104,6 +104,16 @@ public:
     uint64_t total_page_fault_fetch_stall_cycles;
     uint64_t total_page_fault_dram_stall_cycles;
     uint64_t total_page_fault_dram_count;
+    uint64_t num_retired_loads;
+    uint64_t num_retired_stores;
+    uint64_t num_retired_branches;
+    uint64_t load_chain_len_hist[128];
+    uint64_t count_dep_reg_load_store;
+    uint64_t count_dep_mem_store_load;
+    uint64_t num_load_load_chains;
+    uint64_t num_load_store_chains;
+    uint64_t load_load_chain_hist[128];
+    uint64_t load_store_chain_hist[128];
 
     // instruction
     input_instr next_instr;
@@ -206,10 +216,10 @@ public:
         {
             uint64_t total_retired_loads;
             uint64_t total_rob_latency;
-            uint64_t translation_not_blocked;
-            uint64_t translation_blocked;
-            uint64_t data_not_blocked;
-            uint64_t data_blocked;
+            uint64_t total_translation_stall_cycles;
+            uint64_t total_translation_blocked_instances;
+            uint64_t total_data_stall_cycles;
+            uint64_t total_data_blocked_instances;
         } rob_load_waiting;
         struct
         {
@@ -277,6 +287,16 @@ public:
 
         next_print_instruction = STAT_PRINTING_PERIOD;
         num_retired = 0;
+        num_retired_loads = 0;
+        num_retired_stores = 0;
+        num_retired_branches = 0;
+        std::fill(std::begin(load_chain_len_hist), std::end(load_chain_len_hist), 0);
+        count_dep_reg_load_store = 0;
+        count_dep_mem_store_load = 0;
+        num_load_load_chains = 0;
+        num_load_store_chains = 0;
+        std::fill(std::begin(load_load_chain_hist), std::end(load_load_chain_hist), 0);
+        std::fill(std::begin(load_store_chain_hist), std::end(load_store_chain_hist), 0);
 
         inflight_reg_executions = 0;
         inflight_mem_executions = 0;

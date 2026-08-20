@@ -242,30 +242,29 @@ void print_core_roi_stats(uint32_t cpu)
     {
         // rob load waiting stats
         double avg_rob_latency = 0;
-        double avg_trans_not_blocked = 0;
-        double avg_trans_blocked = 0;
-        double avg_data_not_blocked = 0;
-        double avg_data_blocked = 0;
+        double avg_translation_stall = 0;
+        double avg_data_stall = 0;
+        if (ooo_cpu[cpu].stats.rob_load_waiting.total_translation_blocked_instances > 0) {
+            avg_translation_stall = (double)ooo_cpu[cpu].stats.rob_load_waiting.total_translation_stall_cycles / 
+                                    ooo_cpu[cpu].stats.rob_load_waiting.total_translation_blocked_instances;
+        }
+        if (ooo_cpu[cpu].stats.rob_load_waiting.total_data_blocked_instances > 0) {
+            avg_data_stall = (double)ooo_cpu[cpu].stats.rob_load_waiting.total_data_stall_cycles / 
+                             ooo_cpu[cpu].stats.rob_load_waiting.total_data_blocked_instances;
+        }
         if (ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads > 0) {
-            double total_loads = ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads;
-            avg_rob_latency = ooo_cpu[cpu].stats.rob_load_waiting.total_rob_latency / total_loads;
-            avg_trans_not_blocked = ooo_cpu[cpu].stats.rob_load_waiting.translation_not_blocked / total_loads;
-            avg_trans_blocked = ooo_cpu[cpu].stats.rob_load_waiting.translation_blocked / total_loads;
-            avg_data_not_blocked = ooo_cpu[cpu].stats.rob_load_waiting.data_not_blocked / total_loads;
-            avg_data_blocked = ooo_cpu[cpu].stats.rob_load_waiting.data_blocked / total_loads;
+            avg_rob_latency = ooo_cpu[cpu].stats.rob_load_waiting.total_rob_latency / (double)ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads;
         }
 
         cout << "Core_" << cpu << "_rob_load_waiting_total_retired_loads " << ooo_cpu[cpu].stats.rob_load_waiting.total_retired_loads << endl
             << "Core_" << cpu << "_rob_load_waiting_total_rob_latency " << ooo_cpu[cpu].stats.rob_load_waiting.total_rob_latency << endl
-            << "Core_" << cpu << "_rob_load_waiting_translation_not_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.translation_not_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_translation_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.translation_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_data_not_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.data_not_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_data_blocked " << ooo_cpu[cpu].stats.rob_load_waiting.data_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_total_translation_stall_cycles " << ooo_cpu[cpu].stats.rob_load_waiting.total_translation_stall_cycles << endl
+            << "Core_" << cpu << "_rob_load_waiting_total_translation_blocked_instances " << ooo_cpu[cpu].stats.rob_load_waiting.total_translation_blocked_instances << endl
+            << "Core_" << cpu << "_rob_load_waiting_total_data_stall_cycles " << ooo_cpu[cpu].stats.rob_load_waiting.total_data_stall_cycles << endl
+            << "Core_" << cpu << "_rob_load_waiting_total_data_blocked_instances " << ooo_cpu[cpu].stats.rob_load_waiting.total_data_blocked_instances << endl
             << "Core_" << cpu << "_rob_load_waiting_avg_rob_latency " << avg_rob_latency << endl
-            << "Core_" << cpu << "_rob_load_waiting_avg_translation_not_blocked " << avg_trans_not_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_avg_translation_blocked " << avg_trans_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_avg_data_not_blocked " << avg_data_not_blocked << endl
-            << "Core_" << cpu << "_rob_load_waiting_avg_data_blocked " << avg_data_blocked << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_translation_stall_cycles " << avg_translation_stall << endl
+            << "Core_" << cpu << "_rob_load_waiting_avg_data_stall_cycles " << avg_data_stall << endl
             << endl;
 
         // Combined ROB-blocking load latency distribution histogram
@@ -547,9 +546,15 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         TOTAL_MISS += cache->roi_miss[cpu][i];
     }
 
+    double mpki = 0.0;
+    if (ooo_cpu[cpu].finish_sim_instr > 0) {
+        mpki = (1000.0 * TOTAL_MISS) / ooo_cpu[cpu].finish_sim_instr;
+    }
+
     cout<< "Core_" << cpu << "_" << cache->NAME << "_total_access " << TOTAL_ACCESS << endl
         << "Core_" << cpu << "_" << cache->NAME << "_total_hit " << TOTAL_HIT << endl
         << "Core_" << cpu << "_" << cache->NAME << "_total_miss " << TOTAL_MISS << endl
+        << "Core_" << cpu << "_" << cache->NAME << "_MPKI " << mpki << endl
         << "Core_" << cpu << "_" << cache->NAME << "_loads " << cache->roi_access[cpu][0] << endl
         << "Core_" << cpu << "_" << cache->NAME << "_load_hit " << cache->roi_hit[cpu][0] << endl
         << "Core_" << cpu << "_" << cache->NAME << "_load_miss " << cache->roi_miss[cpu][0] << endl
@@ -1077,8 +1082,45 @@ void print_addr_translation_stats(uint32_t cpu)
         << "Core_" << cpu << "_minor_fault " << core_minor_fault << endl;
     cout << "Core_" << cpu << "_page_fault_fetch_stall_cycles " << ooo_cpu[cpu].total_page_fault_fetch_stall_cycles << endl
         << "Core_" << cpu << "_page_fault_dram_stall_cycles " << ooo_cpu[cpu].total_page_fault_dram_stall_cycles << endl
-        << "Core_" << cpu << "_page_fault_dram_count " << ooo_cpu[cpu].total_page_fault_dram_count << endl
-        << endl;
+        << "Core_" << cpu << "_page_fault_dram_count " << ooo_cpu[cpu].total_page_fault_dram_count << endl;
+
+    double ptw_pki = 0.0;
+    if (ooo_cpu[cpu].finish_sim_instr > 0 && ooo_cpu[cpu].page_table_walker != nullptr) {
+        ptw_pki = (1000.0 * ooo_cpu[cpu].page_table_walker->stats.total_walks_initiated) / ooo_cpu[cpu].finish_sim_instr;
+    }
+
+    cout << "Core_" << cpu << "_num_retired_loads " << ooo_cpu[cpu].num_retired_loads << endl
+         << "Core_" << cpu << "_num_retired_stores " << ooo_cpu[cpu].num_retired_stores << endl
+         << "Core_" << cpu << "_num_retired_branches " << ooo_cpu[cpu].num_retired_branches << endl
+         << "Core_" << cpu << "_count_dep_reg_load_store " << ooo_cpu[cpu].count_dep_reg_load_store << endl
+         << "Core_" << cpu << "_count_dep_mem_store_load " << ooo_cpu[cpu].count_dep_mem_store_load << endl
+         << "Core_" << cpu << "_num_load_load_chains " << ooo_cpu[cpu].num_load_load_chains << endl
+         << "Core_" << cpu << "_num_load_store_chains " << ooo_cpu[cpu].num_load_store_chains << endl
+         << "Core_" << cpu << "_PTW_PKI " << ptw_pki << endl;
+
+    cout << "Core_" << cpu << "_load_chain_len_histogram:";
+    for (uint32_t i = 0; i < 128; i++) {
+        if (ooo_cpu[cpu].load_chain_len_hist[i] > 0) {
+            cout << " [" << i << "]: " << ooo_cpu[cpu].load_chain_len_hist[i];
+        }
+    }
+    cout << endl;
+
+    cout << "Core_" << cpu << "_load_load_chain_histogram:";
+    for (uint32_t i = 0; i < 128; i++) {
+        if (ooo_cpu[cpu].load_load_chain_hist[i] > 0) {
+            cout << " [" << i << "]: " << ooo_cpu[cpu].load_load_chain_hist[i];
+        }
+    }
+    cout << endl;
+
+    cout << "Core_" << cpu << "_load_store_chain_histogram:";
+    for (uint32_t i = 0; i < 128; i++) {
+        if (ooo_cpu[cpu].load_store_chain_hist[i] > 0) {
+            cout << " [" << i << "]: " << ooo_cpu[cpu].load_store_chain_hist[i];
+        }
+    }
+    cout << endl << endl;
 }
 
 void finish_warmup()

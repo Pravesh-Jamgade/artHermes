@@ -133,6 +133,8 @@ public:
 
 	fastset (void) { card = 0; }
 
+	bool empty() const { return card == 0; }
+
 	// destructor
 
 	~fastset (void) { }

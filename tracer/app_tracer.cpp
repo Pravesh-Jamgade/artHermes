@@ -12,6 +12,16 @@
 #include <iostream>
 #include <csignal>
 #include <cstdlib>
+#include <sys/syscall.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#ifndef SYS_gettimeofday
+#define SYS_gettimeofday __NR_gettimeofday
+#endif
+#ifndef SYS_clock_gettime
+#define SYS_clock_gettime __NR_clock_gettime
+#endif
 
 /*
 tracer_new.cpp
@@ -184,8 +194,13 @@ VOID WriteCurrentInstruction(THREADID tid)
   auto* st = GetState(tid);
   if (!st) return;
 
+  uint64_t total_limit = KnobSkipInstructions.Value() + KnobTraceInstructions.Value();
+  if (st->instrCount > total_limit + 1) {
+    return;
+  }
+
   st->curr.record_size = sizeof(trace_instr_format_t);//valid instruction
-  st->curr.magic = st->instrCount > (KnobSkipInstructions.Value() + KnobTraceInstructions.Value()) ? END_MAGIC : MAGIC;
+  st->curr.magic = st->instrCount > total_limit ? END_MAGIC : MAGIC;
   st->curr.trace_window = 1;
   st->curr.window_id = window_id;
 
@@ -340,6 +355,63 @@ VOID Instruction(INS ins, VOID*)
                      IARG_THREAD_ID, IARG_END);
 }
 
+// Structure to store syscall arguments at entry, so they can be modified at exit
+struct syscall_info_t {
+  ADDRINT num;
+  ADDRINT arg0;
+  ADDRINT arg1;
+};
+
+// Thread-local array to save syscall details per thread (supporting up to 1024 threads)
+static syscall_info_t sys_info[1024];
+
+// Captures system call number and arguments at entry
+VOID SyscallEntry(THREADID threadIndex, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v)
+{
+  if (threadIndex != tracked_tid) return;
+  ADDRINT syscall_number = PIN_GetSyscallNumber(ctxt, std);
+  sys_info[threadIndex].num = syscall_number;
+  sys_info[threadIndex].arg0 = PIN_GetSyscallArgument(ctxt, std, 0);
+  sys_info[threadIndex].arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+}
+
+// Overrides time-related system calls at exit to return deterministic virtual time
+VOID SyscallExit(THREADID threadIndex, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v)
+{
+  if (threadIndex != tracked_tid) return;
+  auto* st = GetState(threadIndex);
+  if (!st) return;
+
+  ADDRINT syscall_number = sys_info[threadIndex].num;
+  
+  // Virtualize gettimeofday
+  if (syscall_number == SYS_gettimeofday) {
+    ADDRINT arg0 = sys_info[threadIndex].arg0;
+    if (arg0 != 0) {
+      struct timeval tv;
+      uint64_t insts = st->instrCount;
+      // Virtual time: 0.5 ns per instruction (matching 2 GHz core) from a fixed start epoch
+      uint64_t total_ns = insts * 0.5;
+      tv.tv_sec = 1700000000 + (total_ns / 1000000000ULL);
+      tv.tv_usec = (total_ns % 1000000000ULL) / 1000ULL;
+      PIN_SafeCopy(reinterpret_cast<void*>(arg0), &tv, sizeof(struct timeval));
+    }
+  }
+  // Virtualize clock_gettime
+  else if (syscall_number == SYS_clock_gettime) {
+    ADDRINT arg1 = sys_info[threadIndex].arg1;
+    if (arg1 != 0) {
+      struct timespec ts;
+      uint64_t insts = st->instrCount;
+      // Virtual time: 0.5 ns per instruction (matching 2 GHz core) from a fixed start epoch
+      uint64_t total_ns = insts * 0.5;
+      ts.tv_sec = 1700000000 + (total_ns / 1000000000ULL);
+      ts.tv_nsec = total_ns % 1000000000ULL;
+      PIN_SafeCopy(reinterpret_cast<void*>(arg1), &ts, sizeof(struct timespec));
+    }
+  }
+}
+
 // ---------- Thread management ----------
 VOID ThreadStart(THREADID tid, CONTEXT*, INT32, VOID*)
 {
@@ -436,6 +508,8 @@ int main(int argc, char* argv[])
   
   INS_AddInstrumentFunction(Instruction, nullptr);
   RTN_AddInstrumentFunction(Routine, nullptr);
+  PIN_AddSyscallEntryFunction(SyscallEntry, nullptr);
+  PIN_AddSyscallExitFunction(SyscallExit, nullptr);
   PIN_AddThreadStartFunction(ThreadStart, nullptr);
   PIN_AddThreadFiniFunction(ThreadFini, nullptr);
   PIN_AddFiniFunction(Fini, nullptr);

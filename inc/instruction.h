@@ -160,6 +160,8 @@ class ooo_model_instr {
 
     uint8_t branch_type;
     uint64_t branch_target;
+    uint32_t load_chain_len;
+    int32_t dist_from_load;
 
     uint32_t fetched, scheduled;
     int num_reg_ops, num_mem_ops, num_mem_src, num_mem_dest, num_reg_dependent;
@@ -273,6 +275,8 @@ class ooo_model_instr {
         virtual_address = 0;
         physical_address = 0;
 
+        load_chain_len = 0;
+        dist_from_load = -1;
         num_reg_ops = 0;
         num_mem_ops = 0;
         num_mem_src = 0;
