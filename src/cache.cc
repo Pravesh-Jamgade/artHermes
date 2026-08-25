@@ -3,6 +3,7 @@
 #include "cache.h"
 #include "set.h"
 #include "ooo_cpu.h"
+#include "ptw.h"
 #include "uncore.h"
 #include "logging.h"
 #include "buddy_allocator.h"
@@ -33,6 +34,8 @@
 
 namespace knob
 {
+    // pravesh: shadowSTLB
+    extern string   shadowstlb_mode;
     extern string   offchip_pred_type;
     extern uint32_t semi_perfect_cache_page_buffer_size;
     extern bool     measure_cache_acc;
@@ -1099,6 +1102,112 @@ void CACHE::handle_read()
             uint32_t set = get_set(rq_entry.address);
             int way = check_hit(&rq_entry);
 
+            // pravesh: shadowSTLB
+            bool shadow_hit = false;
+            int shadow_way = -1;
+            uint32_t shadow_set = 0;
+            if (cache_type == IS_STLB) {
+                uint64_t vpn = rq_entry.address;
+                uint64_t newVPN = vpn >> 2;
+                shadow_set = newVPN % ooo_cpu[read_cpu].shadowSTLB.NUM_SET;
+                for (uint32_t w = 0; w < ooo_cpu[read_cpu].shadowSTLB.NUM_WAY; w++) {
+                    if (ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][w].valid &&
+                        ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][w].tag == newVPN) {
+                        shadow_way = w;
+                        break;
+                    }
+                }
+                
+                if (knob::shadowstlb_mode == "analysis") {
+                    if (shadow_way != -1) {
+                        // pravesh: shadowSTLB
+                        ooo_cpu[read_cpu].shadowSTLB.lru_update(shadow_set, shadow_way);
+                        shadow_hit = true;
+                        
+                        uint32_t idx = vpn & 3;
+                        ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[idx] = true;
+                        
+                        if (way < 0 && !ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_pfs[idx]) {
+                            ooo_cpu[read_cpu].shadowSTLB.shadow_stats.stlb_miss_saved_by_shadowSTLB++;
+                        }
+                    } else {
+                        // pravesh: shadowSTLB
+                        // Upon miss, directly do softlookup and fill its entries
+                        for (uint32_t w = 0; w < ooo_cpu[read_cpu].shadowSTLB.NUM_WAY; w++) {
+                            if (!ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][w].valid) {
+                                shadow_way = w;
+                                break;
+                            }
+                        }
+                        if (shadow_way == -1) {
+                            for (uint32_t w = 0; w < ooo_cpu[read_cpu].shadowSTLB.NUM_WAY; w++) {
+                                if (ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][w].lru == ooo_cpu[read_cpu].shadowSTLB.NUM_WAY - 1) {
+                                    shadow_way = w;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (shadow_way != -1) {
+                            if (ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].valid) {
+                                int used_count = 0;
+                                for (int i = 0; i < 4; i++) {
+                                    if (ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[i]) {
+                                        used_count++;
+                                    }
+                                }
+                                ooo_cpu[read_cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[used_count]++;
+                            }
+                            
+                            PTWclass* ptw = (PTWclass*)ooo_cpu[read_cpu].page_table_walker;
+                            if (ptw != nullptr) {
+                                ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].valid = true;
+                                ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].tag = newVPN;
+                                ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].address = newVPN;
+                                
+                                for (int i = 0; i < 4; i++) {
+                                    uint64_t vpn_i = (newVPN << 2) | i;
+                                    uint64_t vaddr_i = vpn_i << 12;
+                                    uint64_t pte_val = 0;
+                                    bool is_pf = false;
+                                    ptw->soft_lookup_pte(vaddr_i, rq_entry.asid[1], pte_val, is_pf);
+                                    
+                                    ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_ptes[i] = pte_val;
+                                    ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_pfs[i] = is_pf;
+                                    ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[i] = false;
+                                }
+                                ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[vpn & 3] = true;
+                                ooo_cpu[read_cpu].shadowSTLB.lru_update(shadow_set, shadow_way);
+                            }
+                        }
+                    }
+                } else {
+                    // pravesh: shadowSTLB
+                    // Detail mode: shadowSTLB replaces STLB
+                    way = -1; // Ignore regular STLB check
+                    if (shadow_way != -1) {
+                        uint32_t idx = vpn & 3;
+                        if (!ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_pfs[idx]) {
+                            // Hit in shadowSTLB! Populate STLB block to satisfy subsequent simulator pipelines safely.
+                            ooo_cpu[read_cpu].shadowSTLB.lru_update(shadow_set, shadow_way);
+                            
+                            ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[idx] = true;
+                            
+                            // Use same way in STLB to store this translation block on hit
+                            block[set][shadow_way].valid = true;
+                            block[set][shadow_way].tag = rq_entry.address;
+                            block[set][shadow_way].address = rq_entry.address;
+                            block[set][shadow_way].full_addr = rq_entry.full_addr;
+                            block[set][shadow_way].data = ooo_cpu[read_cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_ptes[idx] >> 12;
+                            lru_update(set, shadow_way);
+                            
+                            way = shadow_way;
+                            shadow_hit = true;
+                        }
+                    }
+                }
+            }
+
             // Pravesh: if hit, check 8-byte entry there or not
             if (knob::enable_ptw && rq_entry.type == TRANSLATION && rq_entry.from_ptw && way >= 0)
             {
@@ -1919,6 +2028,72 @@ uint32_t CACHE::get_way(uint64_t address, uint32_t set)
 
 void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 {
+    // pravesh: shadowSTLB
+    if (cache_type == IS_STLB && knob::shadowstlb_mode == "detail") {
+        uint64_t vpn = packet->address;
+        uint64_t newVPN = vpn >> 2;
+        uint32_t shadow_set = newVPN % ooo_cpu[packet->cpu].shadowSTLB.NUM_SET;
+        int shadow_way = -1;
+        for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+            if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].valid &&
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].tag == newVPN) {
+                shadow_way = w;
+                break;
+            }
+        }
+        
+        if (shadow_way == -1) {
+            for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+                if (!ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].valid) {
+                    shadow_way = w;
+                    break;
+                }
+            }
+            if (shadow_way == -1) {
+                for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+                    if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].lru == ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY - 1) {
+                        shadow_way = w;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (shadow_way != -1) {
+            if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].valid) {
+                int used_count = 0;
+                for (int i = 0; i < 4; i++) {
+                    if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[i]) {
+                        used_count++;
+                    }
+                }
+                ooo_cpu[packet->cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[used_count]++;
+            }
+            
+            PTWclass* ptw = (PTWclass*)ooo_cpu[packet->cpu].page_table_walker;
+            if (ptw != nullptr) {
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].valid = true;
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].tag = newVPN;
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].address = newVPN;
+                
+                for (int i = 0; i < 4; i++) {
+                    uint64_t vpn_i = (newVPN << 2) | i;
+                    uint64_t vaddr_i = vpn_i << 12;
+                    uint64_t pte_val = 0;
+                    bool is_pf = false;
+                    ptw->soft_lookup_pte(vaddr_i, packet->asid[1], pte_val, is_pf);
+                    
+                    ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_ptes[i] = pte_val;
+                    ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_pfs[i] = is_pf;
+                    ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[i] = false;
+                }
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_used[vpn & 3] = true;
+                ooo_cpu[packet->cpu].shadowSTLB.lru_update(shadow_set, shadow_way);
+            }
+        }
+        return;
+    }
+
 #ifdef SANITY_CHECK
     if (cache_type == IS_ITLB) {
         if (packet->data == 0) {
@@ -2005,6 +2180,59 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
     cout << "[" << NAME << "] " << __func__ << " set: " << set << " way: " << way;
     cout << " lru: " << block[set][way].lru << " tag: " << hex << block[set][way].tag << " full_addr: " << block[set][way].full_addr;
     cout << " data: " << block[set][way].data << dec << endl; });
+
+    // pravesh: shadowSTLB
+    if (cache_type == IS_STLB && knob::shadowstlb_mode != "analysis" && knob::shadowstlb_mode != "detail") {
+        uint64_t vpn = packet->address;
+        uint64_t newVPN = vpn >> 2;
+        uint32_t shadow_set = newVPN % ooo_cpu[packet->cpu].shadowSTLB.NUM_SET;
+        int shadow_way = -1;
+        for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+            if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].valid &&
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].tag == newVPN) {
+                shadow_way = w;
+                break;
+            }
+        }
+        
+        if (shadow_way == -1) {
+            for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+                if (!ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].valid) {
+                    shadow_way = w;
+                    break;
+                }
+            }
+            if (shadow_way == -1) {
+                for (uint32_t w = 0; w < ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY; w++) {
+                    if (ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][w].lru == ooo_cpu[packet->cpu].shadowSTLB.NUM_WAY - 1) {
+                        shadow_way = w;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (shadow_way != -1) {
+            PTWclass* ptw = (PTWclass*)ooo_cpu[packet->cpu].page_table_walker;
+            if (ptw != nullptr) {
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].valid = true;
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].tag = newVPN;
+                ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].address = newVPN;
+                
+                for (int i = 0; i < 4; i++) {
+                    uint64_t vpn_i = (newVPN << 2) | i;
+                    uint64_t vaddr_i = vpn_i << 12;
+                    uint64_t pte_val = 0;
+                    bool is_pf = false;
+                    ptw->soft_lookup_pte(vaddr_i, packet->asid[1], pte_val, is_pf);
+                    
+                    ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_ptes[i] = pte_val;
+                    ooo_cpu[packet->cpu].shadowSTLB.block[shadow_set][shadow_way].shadow_stlb_data.shadow_pfs[i] = is_pf;
+                }
+                ooo_cpu[packet->cpu].shadowSTLB.lru_update(shadow_set, shadow_way);
+            }
+        }
+    }
 }
 
 int CACHE::check_hit(PACKET *packet)

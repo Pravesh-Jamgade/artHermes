@@ -835,3 +835,29 @@ void PTWclass::print_stats() {
              << "," << stats.pred_stats.ddrp_offchip_stalled
              << "\n";  
 }
+
+void PTWclass::soft_lookup_pte(uint64_t vaddr, uint32_t asid, uint64_t &pte_val, bool &is_pf) {
+    // pravesh: shadowSTLB
+    uint64_t table_base = cr3_base_addrs[asid + cpu * knob::num_threads_per_core];
+    for (int lvl = 3; lvl >= 0; lvl--) {
+        uint64_t pte_addr = table_base + get_level_index(vaddr, lvl) * sizeof(uint64_t);
+        buddy_allocator.shadow_init_page(pte_addr >> LOG2_PAGE_SIZE, lvl);
+        
+        uint64_t val = 0;
+        bool is_page_fault = false;
+        bool first_access = false;
+        buddy_allocator.shadow_get_entry(pte_addr, lvl, val, is_page_fault, first_access);
+        
+        if (lvl == 0) {
+            pte_val = val;
+            is_pf = is_page_fault;
+        } else {
+            table_base = val;
+            if (is_page_fault || val == 0) {
+                is_pf = true;
+                pte_val = 0;
+                break;
+            }
+        }
+    }
+}

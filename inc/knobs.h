@@ -28,4 +28,6 @@ namespace knob
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
     extern std::string max_lru_before_eviction_block_type;
+    // Mode for shadowSTLB. "analysis": parallel lookup and direct refill; "detail": shadowSTLB replaces STLB
+    extern std::string shadowstlb_mode;
 }

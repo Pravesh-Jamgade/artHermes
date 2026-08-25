@@ -18,6 +18,8 @@ namespace knob
 	uint32_t stlb_way = STLB_WAY;
 	uint32_t stlb_latency = STLB_LATENCY;
 	string max_lru_before_eviction_block_type = "TRANSLATION";
+	// pravesh: shadowSTLB
+	string shadowstlb_mode = "analysis";
 	uint64_t simulation_instructions = 1000;
 	bool  	 cloudsuite = false;
 	bool     low_bandwidth = false;
@@ -551,6 +553,11 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
     else if (MATCH("", "footprint_track_type"))
     {
 		knob::footprint_track_type = string(value);
+    }
+    else if (MATCH("", "shadowstlb_mode"))
+    {
+		// pravesh: shadowSTLB
+		knob::shadowstlb_mode = string(value);
     }
     else if (MATCH("", "stlb_set"))
     {

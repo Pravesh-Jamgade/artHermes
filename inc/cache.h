@@ -387,8 +387,14 @@ class CACHE : public MEMORY {
         l1d_prefetcher_broadcast_acc(uint32_t bw_level),
         l2c_prefetcher_broadcast_acc(uint32_t bw_level),
         llc_prefetcher_broadcast_acc(uint32_t bw_level);
-    void reconfigure(uint32_t sets, uint32_t ways, uint32_t latency);
-};
+     void reconfigure(uint32_t sets, uint32_t ways, uint32_t latency);
+
+     // pravesh: shadowSTLB
+     struct ShadowSTLBStats {
+         uint64_t stlb_miss_saved_by_shadowSTLB = 0;
+         uint64_t shadow_block_footprint_hist[5] = {0};
+     } shadow_stats;
+ };
 
 void print_cache_config();
 

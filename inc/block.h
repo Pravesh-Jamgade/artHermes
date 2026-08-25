@@ -37,6 +37,14 @@ class BLOCK {
     // replacement state
     uint32_t lru;
 
+    // pravesh: shadowSTLB
+    // Shadow STLB block structure grouping 4 contiguous page table entries
+    struct ShadowSTLBBlockData {
+        uint64_t shadow_ptes[4]; // Holds translated physical addresses for VPNs: newVPN00, newVPN01, newVPN10, newVPN11
+        bool shadow_pfs[4];      // Track fault status (true = page fault) for each of the 4 translations
+        bool shadow_used[4];     // Track whether each translation was used (accessed) during residency
+    } shadow_stlb_data;
+
     // RBERA: metadata
     uint32_t reuse[NUM_TYPES];
     uint32_t dependents;
@@ -81,6 +89,13 @@ class BLOCK {
         asid[1] = UINT8_MAX;
 
         lru = 0;
+        // pravesh: shadowSTLB
+        // Initialize shadow STLB translation entries and page fault tracking statuses
+        for (int i = 0; i < 4; i++) {
+            shadow_stlb_data.shadow_ptes[i] = 0;
+            shadow_stlb_data.shadow_pfs[i] = false;
+            shadow_stlb_data.shadow_used[i] = false;
+        }
         doa_pred_bit = 0; // Deadblock pred
         usage = 0;         // Deadblock pred
         max_lru_before_eviction = 0;

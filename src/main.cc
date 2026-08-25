@@ -577,8 +577,22 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_useful " << cache->pf_useful << endl
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_useless " << cache->pf_useless << endl
         << "Core_" << cpu << "_" << cache->NAME << "_prefetch_late " << cache->pf_late << endl
-        << "Core_" << cpu << "_" << cache->NAME << "_average_miss_latency " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << endl
-        << endl
+        << "Core_" << cpu << "_" << cache->NAME << "_average_miss_latency " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << endl;
+
+    // pravesh: shadowSTLB
+    if (cache->NAME == "STLB") {
+        if (knob::shadowstlb_mode == "analysis") {
+            cout << "Core_" << cpu << "_stlb_miss_saved_by_shadowSTLB " << ooo_cpu[cpu].shadowSTLB.shadow_stats.stlb_miss_saved_by_shadowSTLB << endl;
+        }
+        cout << "Core_" << cpu << "_shadowSTLB_block_footprint_hist_key: 1,2,3,4" << endl;
+        cout << "Core_" << cpu << "_shadowSTLB_block_footprint_hist_val: "
+             << ooo_cpu[cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[1] << ","
+             << ooo_cpu[cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[2] << ","
+             << ooo_cpu[cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[3] << ","
+             << ooo_cpu[cpu].shadowSTLB.shadow_stats.shadow_block_footprint_hist[4] << endl;
+    }
+
+    cout << endl
         << "Core_" << cpu << "_" << cache->NAME << "_rq_access " << cache->RQ->ACCESS << endl
         << "Core_" << cpu << "_" << cache->NAME << "_rq_forward " << cache->RQ->FORWARD << endl
         << "Core_" << cpu << "_" << cache->NAME << "_rq_merged " << cache->RQ->MERGED << endl
@@ -1098,6 +1112,7 @@ void print_addr_translation_stats(uint32_t cpu)
          << "Core_" << cpu << "_num_load_store_chains " << ooo_cpu[cpu].num_load_store_chains << endl
          << "Core_" << cpu << "_PTW_PKI " << ptw_pki << endl;
 
+    
     auto print_hist = [](const string &prefix, const uint64_t *hist, uint32_t size) {
         cout << prefix << "_keys";
         for (uint32_t i = 0; i < size; i++) {
@@ -1969,6 +1984,12 @@ int main(int argc, char** argv)
         ooo_cpu[i].STLB.fill_level = FILL_L2;
         ooo_cpu[i].STLB.upper_level_icache[i] = &ooo_cpu[i].ITLB;
         ooo_cpu[i].STLB.upper_level_dcache[i] = &ooo_cpu[i].DTLB;
+
+        // pravesh: shadowSTLB
+        // Initialize and reconfigure the parallel shadowSTLB cache metadata structure
+        ooo_cpu[i].shadowSTLB.cpu = i;
+        ooo_cpu[i].shadowSTLB.cache_type = IS_STLB;
+        ooo_cpu[i].shadowSTLB.reconfigure(knob::stlb_set, knob::stlb_way, knob::stlb_latency);
 
         // initialize core subsystems (PTW creation happens here)
         ooo_cpu[i].initialize_core();

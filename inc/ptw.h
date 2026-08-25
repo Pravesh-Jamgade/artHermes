@@ -219,6 +219,8 @@ public:
     uint64_t get_level_tag(uint64_t curr_pa, uint32_t level);
 
     bool oracle_predictor(PACKET* packet);
+    // pravesh: shadowSTLB
+    void soft_lookup_pte(uint64_t vaddr, uint32_t asid, uint64_t &pte_val, bool &is_pf);
   
     // Check if walk can proceed
     bool is_walk_queue_available(uint64_t vaddr);
