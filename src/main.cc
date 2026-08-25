@@ -1098,29 +1098,27 @@ void print_addr_translation_stats(uint32_t cpu)
          << "Core_" << cpu << "_num_load_store_chains " << ooo_cpu[cpu].num_load_store_chains << endl
          << "Core_" << cpu << "_PTW_PKI " << ptw_pki << endl;
 
-    cout << "Core_" << cpu << "_load_chain_len_histogram:";
-    for (uint32_t i = 0; i < 128; i++) {
-        if (ooo_cpu[cpu].load_chain_len_hist[i] > 0) {
-            cout << " [" << i << "]: " << ooo_cpu[cpu].load_chain_len_hist[i];
+    auto print_hist = [](const string &prefix, const uint64_t *hist, uint32_t size) {
+        cout << prefix << "_keys";
+        for (uint32_t i = 0; i < size; i++) {
+            if (hist[i] > 0) {
+                cout << "," << i;
+            }
         }
-    }
-    cout << endl;
+        cout << endl;
+        cout << prefix << "_values";
+        for (uint32_t i = 0; i < size; i++) {
+            if (hist[i] > 0) {
+                cout << "," << hist[i];
+            }
+        }
+        cout << endl;
+    };
 
-    cout << "Core_" << cpu << "_load_load_chain_histogram:";
-    for (uint32_t i = 0; i < 128; i++) {
-        if (ooo_cpu[cpu].load_load_chain_hist[i] > 0) {
-            cout << " [" << i << "]: " << ooo_cpu[cpu].load_load_chain_hist[i];
-        }
-    }
+    print_hist("Core_" + to_string(cpu) + "_load_chain_len_histogram", ooo_cpu[cpu].load_chain_len_hist, 128);
+    print_hist("Core_" + to_string(cpu) + "_load_load_chain_histogram", ooo_cpu[cpu].load_load_chain_hist, 128);
+    print_hist("Core_" + to_string(cpu) + "_load_store_chain_histogram", ooo_cpu[cpu].load_store_chain_hist, 128);
     cout << endl;
-
-    cout << "Core_" << cpu << "_load_store_chain_histogram:";
-    for (uint32_t i = 0; i < 128; i++) {
-        if (ooo_cpu[cpu].load_store_chain_hist[i] > 0) {
-            cout << " [" << i << "]: " << ooo_cpu[cpu].load_store_chain_hist[i];
-        }
-    }
-    cout << endl << endl;
 }
 
 void finish_warmup()

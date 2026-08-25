@@ -1311,6 +1311,10 @@ void CACHE::handle_read()
             }
             else // read miss
             {
+                // if(cache_type == IS_STLB){
+                //     cout <<"cy, " <<dec<< current_core_cycle[read_cpu] << " , addr, " << hex << RQ->peek().address << ", fulladdr, " << RQ->peek().full_addr << ", t, " << +RQ->peek().instruction << ", " << dec << endl;
+                // }
+
                 add_history_event(current_core_cycle[read_cpu], rq_entry.instr_id, rq_entry.virt_addr, rq_entry.address, rq_entry.full_addr, rq_entry.type, "CACHE_MISS", NAME.c_str(), false, false, true, false, 0, rq_entry.hit_where);
                 DP ( if (warmup_complete[read_cpu]) {
                 cout << "[" << NAME << "] " << __func__ << " read miss";
