@@ -493,6 +493,42 @@ VOID Fini(INT32 code, VOID* v)
   }
 }
 
+VOID Image(IMG img, VOID* v)
+{
+  if (IMG_IsMainExecutable(img)) {
+    for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
+      for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn)) {
+        RTN_Open(rtn);
+        for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)) {
+          Instruction(ins, nullptr);
+        }
+        RTN_Close(rtn);
+      }
+    }
+  }
+}
+
+VOID Trace(TRACE trace, VOID* v)
+{
+    // 1. Find which image owns the starting address of this execution trace
+    IMG img = IMG_FindByAddress(TRACE_Address(trace));
+    
+    // 2. Safely check if the image is valid and is the main executable
+    if (IMG_Valid(img) && IMG_IsMainExecutable(img))
+    {
+        // 3. Iterate through every Basic Block (BBL) in the trace
+        for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+        {
+            // 4. Iterate through every Instruction (INS) in the BBL
+            for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+            {
+                // Call your existing instrumentation function
+                Instruction(ins, nullptr);
+            }
+        }
+    }
+}
+
 int main(int argc, char* argv[])
 {
   PIN_InitSymbols();
@@ -506,8 +542,11 @@ int main(int argc, char* argv[])
   // buffered is GOOD
   setvbuf(g_out, nullptr, _IOFBF, 1 << 20); // 1MB buffer
   
-  INS_AddInstrumentFunction(Instruction, nullptr);
-  RTN_AddInstrumentFunction(Routine, nullptr);
+  // IMG_AddInstrumentFunction(Image, nullptr);
+  // RTN_AddInstrumentFunction(Routine, nullptr);
+  
+  TRACE_AddInstrumentFunction(Trace, nullptr);
+  
   PIN_AddSyscallEntryFunction(SyscallEntry, nullptr);
   PIN_AddSyscallExitFunction(SyscallExit, nullptr);
   PIN_AddThreadStartFunction(ThreadStart, nullptr);
