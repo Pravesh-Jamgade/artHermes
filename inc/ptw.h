@@ -91,13 +91,13 @@ public:
         uint64_t virt_full_addr;
         int      current_level;   // level to process next (3=PML4 down to 0=PT)
         uint64_t phy_full_addr;      // page-table base address for current_level
-        uint64_t requested_cycle, event_cycle;
+        uint64_t requested_cycle, event_cycle, enqueue_cycle;
         uint32_t instr_id;
         PACKET   packet;          // original STLB packet, copied by value
         PTW_LevelStats level_stats[PWC_TOTAL_LEVELS];
         uint64_t total_page_faults;
         OutstandingWalk() : virt_full_addr(0), current_level(3), phy_full_addr(0),
-                            requested_cycle(0), event_cycle(0), instr_id(0), total_page_faults(0) {}
+                            requested_cycle(0), event_cycle(0), enqueue_cycle(0), instr_id(0), total_page_faults(0) {}
     };
 
     // MSHR entry for in-flight page table memory requests
@@ -172,6 +172,9 @@ public:
     } stats;
 
     LatencyHistogram level_service_time_hist[PWC_TOTAL_LEVELS];
+    
+    // pravesh: shadowSTLB
+    LatencyHistogram ptw_rq_waiting_time_hist;
     
     // PTW configuration
     uint32_t PTW_LATENCY,PTW_RQ_LATENCY;

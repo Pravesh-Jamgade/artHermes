@@ -398,7 +398,6 @@ void O3_CPU::read_from_trace()
             arch_instr.is_load = 1;
         if (num_mem_dest > 0)
             arch_instr.is_store = 1;
-        arch_instr.load_chain_len = arch_instr.is_load ? 1 : 0;
         arch_instr.dist_from_load = arch_instr.is_load ? 0 : -1;
 
         // determine branch type
@@ -1253,15 +1252,6 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
             ROB.entry[current].num_reg_dependent++;
             ROB.entry[current].reg_RAW_checked[source_index] = 1;
 
-            if (ROB.entry[current].is_load) {
-                if (ROB.entry[prior].is_load) {
-                    ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len + 1);
-                } else if (ROB.entry[prior].load_chain_len > 0) {
-                    ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len + 1);
-                }
-            } else {
-                ROB.entry[current].load_chain_len = std::max(ROB.entry[current].load_chain_len, ROB.entry[prior].load_chain_len);
-            }
 
             int32_t prior_dist = ROB.entry[prior].is_load ? 0 : ROB.entry[prior].dist_from_load;
             if (ROB.entry[prior].is_load || ROB.entry[prior].dist_from_load >= 0) {
@@ -2711,9 +2701,6 @@ void O3_CPU::retire_rob()
         if (warmup_complete[cpu]) {
             if (ROB.entry[ROB.head].is_load) {
                 num_retired_loads++;
-                uint32_t len = ROB.entry[ROB.head].load_chain_len;
-                if (len >= 128) len = 127;
-                load_chain_len_hist[len]++;
 
                 bool is_leaf = ROB.entry[ROB.head].registers_instrs_depend_on_me.empty() && 
                               ROB.entry[ROB.head].memory_instrs_depend_on_me.empty();

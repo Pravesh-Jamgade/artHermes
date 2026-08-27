@@ -10,6 +10,7 @@
 #include "defs.h"
 #include "offchip_pred_base_helper.h"
 #include "const.h"
+#include "hist.h"
 
 // CACHE BLOCK
 class BLOCK {
@@ -365,6 +366,9 @@ class PACKET_QUEUE_BASE
         uint64_t requests_seen[NUM_PARTITION_TYPES];
         uint64_t total_queueing_delay[NUM_PARTITION_TYPES];
     } stats;
+
+    // pravesh: shadowSTLB
+    LatencyHistogram waiting_time_hist;
 
     PACKET_QUEUE_BASE(string v1, uint32_t v2) : NAME(v1), SIZE(v2)
     {

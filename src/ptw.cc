@@ -341,6 +341,7 @@ bool PTWclass::initiate_page_walk(PACKET *packet, uint64_t vaddr) {
     new_walk.current_level = 3; // Start from L4 (PML4)
     new_walk.phy_full_addr = cr3_base_addrs[packet->asid[1] + cpu * knob::num_threads_per_core]; // initial PA is CR3 base, we will add level offsets in operate()
     new_walk.requested_cycle = current_core_cycle[cpu];
+    new_walk.enqueue_cycle = current_core_cycle[cpu];
     new_walk.instr_id = packet->instr_id;
     new_walk.packet = *packet;  // copy by value — packet ptr may become stale before walk completes
     outstanding_walks.push_back(new_walk);
@@ -380,6 +381,7 @@ void PTWclass::operate() {
                 nw.current_level   = next_level;
                 nw.phy_full_addr   = me.next_level_base; // table base for next level
                 nw.requested_cycle = me.requested_cycle;
+                nw.enqueue_cycle   = current_core_cycle[cpu];
                 nw.instr_id        = me.instr_id;
                 nw.packet          = me.packet;
                 nw.event_cycle = current_core_cycle[cpu] + PTW_RQ_LATENCY;
@@ -608,6 +610,10 @@ void PTWclass::operate() {
     // Remove dispatched / completed walks in reverse order to preserve indices
     for (int j = (int)to_remove.size() - 1; j >= 0; j--)
     {
+        // pravesh: shadowSTLB
+        uint64_t wait_time = current_core_cycle[cpu] - outstanding_walks[to_remove[j]].enqueue_cycle;
+        ptw_rq_waiting_time_hist.update(wait_time);
+
         l.log("PTWRemoveOutstanding, vaddr", hex2str(outstanding_walks[to_remove[j]].virt_full_addr), "level", outstanding_walks[to_remove[j]].current_level, "base_pt", hex2str(outstanding_walks[to_remove[j]].phy_full_addr), "instr", outstanding_walks[to_remove[j]].instr_id, "ins", +outstanding_walks[to_remove[j]].packet.instruction, "current-cy", current_core_cycle[cpu], '\n');
         outstanding_walks.erase(outstanding_walks.begin() + to_remove[j]);
     }

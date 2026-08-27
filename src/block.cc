@@ -82,6 +82,9 @@ void PACKET_QUEUE_BASE::record_queue_stats(PACKET *packet)
 
     stats.requests_seen[rob_part_type]++;
     stats.total_queueing_delay[rob_part_type] += delay;
+
+    // pravesh: shadowSTLB
+    waiting_time_hist.update(delay);
 }
 
 void PACKET_QUEUE_BASE::dump_stats()
@@ -249,7 +252,7 @@ void PACKET_QUEUE::remove_queue(PACKET *packet, uint64_t timestamp)
     // cout << " timestamp: " << timestamp << " packet_timestamp: " << packet->deque_cycle[module_type][queue_type] << endl;
 
     // record queueing stats
-    if(is_RQ)
+    if(is_RQ || is_WQ)
         record_queue_stats(packet);
 
     // reset entry
@@ -358,7 +361,7 @@ void PACKET_QUEUE_PRIORITY::remove_queue(PACKET *packet, uint64_t timestamp)
     packet->deque_cycle[module_type][queue_type] = timestamp;
 
     // record queueing stats
-    if(is_RQ)
+    if(is_RQ || is_WQ)
         record_queue_stats(packet);
     
     // delete the head element

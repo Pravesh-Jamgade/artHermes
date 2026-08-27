@@ -866,6 +866,10 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
     // print queue stats
     cout << "[Core_" << cpu << "_" << cache->NAME << "_RQ]" << endl;
     cache->RQ->dump_stats();
+
+    // pravesh: shadowSTLB
+    cache->RQ->waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_" + cache->NAME + "_rq_waiting_time_hist").c_str());
+    cache->WQ.waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_" + cache->NAME + "_wq_waiting_time_hist").c_str());
 }
 
 void print_sim_stats(uint32_t cpu, CACHE *cache)
@@ -1130,9 +1134,13 @@ void print_addr_translation_stats(uint32_t cpu)
         cout << endl;
     };
 
-    print_hist("Core_" + to_string(cpu) + "_load_chain_len_histogram", ooo_cpu[cpu].load_chain_len_hist, 128);
     print_hist("Core_" + to_string(cpu) + "_load_load_chain_histogram", ooo_cpu[cpu].load_load_chain_hist, 128);
     print_hist("Core_" + to_string(cpu) + "_load_store_chain_histogram", ooo_cpu[cpu].load_store_chain_hist, 128);
+
+    // pravesh: shadowSTLB
+    if (ooo_cpu[cpu].page_table_walker != nullptr) {
+        ooo_cpu[cpu].page_table_walker->ptw_rq_waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_PTW_RQ_waiting_time_hist").c_str());
+    }
     cout << endl;
 }
 

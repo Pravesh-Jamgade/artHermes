@@ -107,7 +107,6 @@ public:
     uint64_t num_retired_loads;
     uint64_t num_retired_stores;
     uint64_t num_retired_branches;
-    uint64_t load_chain_len_hist[128];
     uint64_t count_dep_reg_load_store;
     uint64_t count_dep_mem_store_load;
     uint64_t num_load_load_chains;
@@ -293,7 +292,6 @@ public:
         num_retired_loads = 0;
         num_retired_stores = 0;
         num_retired_branches = 0;
-        std::fill(std::begin(load_chain_len_hist), std::end(load_chain_len_hist), 0);
         count_dep_reg_load_store = 0;
         count_dep_mem_store_load = 0;
         num_load_load_chains = 0;
