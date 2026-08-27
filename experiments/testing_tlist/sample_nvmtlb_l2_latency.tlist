@@ -1,0 +1,11 @@
+NAME=llama2.c-stories15M.1
+TRACE=$(HERMES_TRACE)/llama2.c-stories15M.1.champsimtrace.gz
+KNOBS=""
+
+NAME=clip_trace_1.champsimtrace-024.gz
+TRACE=$(HERMES_TRACE)/clip_trace_1.champsimtrace-024.gz
+KNOBS=""
+
+NAME=bc-0
+TRACE=$(HERMES_TRACE)/bc-0.trace.gz
+KNOBS=
