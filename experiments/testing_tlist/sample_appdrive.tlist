@@ -1,0 +1,9 @@
+APP_PATH=$(GRAPH_APP)/sssp
+APP_INPUT=-f $(GRAPH_INPUT)/kron.wsg 
+APP_ARG=-d2
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
+
+APP_PATH=$(GRAPH_APP)/pr
+APP_INPUT=-f $(GRAPH_INPUT)/web.sg 
+APP_ARG=-i1000 -t1e-4 -n16 
+APP_PHASE=$(GRAPH_PHASE_DIR)/output_ppki.csv
