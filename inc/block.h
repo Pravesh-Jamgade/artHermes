@@ -226,6 +226,7 @@ class PACKET {
     uint8_t from_ptw;              // set when packet originated from PTW walk
     uint32_t ptw_level;            // which PwC level this request corresponds to
     void *ptw_walk_ptr;            // pointer back to OutstandingWalk
+    uint8_t started_latency;       // tracks if latency countdown has started at the head of queue
 
     uint8_t went_offchip_pred; // populated from corresponding LQ entry
     uint32_t doa_pred_bit; // Deadblock pred: LLC perceptron prediction (0=unset, 1=predicted hit, 2=predicted miss)
@@ -317,6 +318,7 @@ class PACKET {
         from_ptw = 0;
         ptw_level = 0;
         ptw_walk_ptr = NULL;
+        started_latency = 0;
         
         ocp_feature = NULL;
         went_offchip = false;
@@ -369,6 +371,7 @@ class PACKET_QUEUE_BASE
 
     // pravesh: shadowSTLB
     LatencyHistogram waiting_time_hist;
+    LatencyHistogram ptw_translation_waiting_time_hist;
 
     PACKET_QUEUE_BASE(string v1, uint32_t v2) : NAME(v1), SIZE(v2)
     {

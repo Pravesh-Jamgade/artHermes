@@ -85,6 +85,10 @@ void PACKET_QUEUE_BASE::record_queue_stats(PACKET *packet)
 
     // pravesh: shadowSTLB
     waiting_time_hist.update(delay);
+
+    if (is_RQ && packet->from_ptw) {
+        ptw_translation_waiting_time_hist.update(delay);
+    }
 }
 
 void PACKET_QUEUE_BASE::dump_stats()

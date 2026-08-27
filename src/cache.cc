@@ -601,8 +601,15 @@ void CACHE::handle_writeback()
         return;
     }
 
+    uint64_t current_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[writeback_cpu];
+
+    if (WQ.entry[WQ.head].started_latency == 0) {
+        WQ.entry[WQ.head].event_cycle = current_cycle + LATENCY;
+        WQ.entry[WQ.head].started_latency = 1;
+    }
+
     // handle the oldest entry
-    if ((WQ.entry[WQ.head].event_cycle <= current_core_cycle[writeback_cpu]) && (WQ.occupancy > 0)) 
+    if ((WQ.entry[WQ.head].event_cycle <= current_cycle) && (WQ.occupancy > 0)) 
     {
         int index = WQ.head;
 
@@ -1004,9 +1011,16 @@ void CACHE::handle_read()
         }
         
         uint32_t read_cpu = RQ->peek().cpu;
+        uint64_t current_cycle = cache_type == IS_LLC ? uncore.cycle : current_core_cycle[read_cpu];
+
+        if (RQ->peek().started_latency == 0) {
+            PACKET& head_entry = RQ->peek();
+            head_entry.event_cycle = current_cycle + LATENCY;
+            head_entry.started_latency = 1;
+        }
 
         // handle the oldest entry
-        if ((RQ->peek().event_cycle <= current_core_cycle[read_cpu]) && (RQ->occupancy > 0)) 
+        if ((RQ->peek().event_cycle <= current_cycle) && (RQ->occupancy > 0)) 
         {
             int index = RQ->get_head();
             PACKET& rq_entry = RQ->get_entry(RQ->get_head());
@@ -2578,14 +2592,8 @@ int CACHE::add_rq(PACKET *packet)
     add_history_event(enque_cycle, packet->instr_id, packet->virt_addr, packet->address, packet->full_addr, packet->type, "ADD_RQ", NAME.c_str(), false, false, false, false, 0, packet->hit_where);
 
     // ADD LATENCY
-    if (rq_entry.event_cycle < current_core_cycle[packet->cpu])
-    {
-        rq_entry.event_cycle = current_core_cycle[packet->cpu] + LATENCY;
-    }
-    else
-    {
-        rq_entry.event_cycle += LATENCY;
-    }
+    rq_entry.event_cycle = enque_cycle;
+    rq_entry.started_latency = 0;
 
     // // Deadblock pred: predict read hit/miss for LOADs at LLC
     // if (cache_type == IS_LLC && rq_entry.type == LOAD && knob::knob_doa_predictor && llc_pred_perc != NULL)
@@ -2651,14 +2659,8 @@ int CACHE::add_wq(PACKET *packet)
     // WQ.entry[index] = *packet;
 
     // ADD LATENCY
-    if (WQ.entry[index].event_cycle < current_core_cycle[packet->cpu])
-    {
-        WQ.entry[index].event_cycle = current_core_cycle[packet->cpu] + LATENCY;
-    }
-    else
-    {
-        WQ.entry[index].event_cycle += LATENCY;
-    }
+    WQ.entry[index].event_cycle = enque_cycle;
+    WQ.entry[index].started_latency = 0;
 
     // WQ.occupancy++;
     // WQ.tail++;

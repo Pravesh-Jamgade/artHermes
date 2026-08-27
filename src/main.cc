@@ -873,6 +873,7 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 
     // pravesh: shadowSTLB
     cache->RQ->waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_" + cache->NAME + "_rq_waiting_time_hist").c_str());
+    cache->RQ->ptw_translation_waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_" + cache->NAME + "_rq_ptw_translation_waiting_time_hist").c_str());
     cache->WQ.waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_" + cache->NAME + "_wq_waiting_time_hist").c_str());
 }
 
