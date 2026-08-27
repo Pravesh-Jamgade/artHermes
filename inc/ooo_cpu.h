@@ -114,6 +114,11 @@ public:
     uint64_t load_load_chain_hist[128];
     uint64_t load_store_chain_hist[128];
 
+    // pravesh: shadowSTLB
+    LatencyHistogram load_load_chain_latency_hist;
+    LatencyHistogram load_store_chain_latency_hist;
+    LatencyHistogram dep_chain_latency_hist;
+
     // instruction
     input_instr next_instr;
     input_instr current_instr;

@@ -92,6 +92,10 @@ namespace knob
     extern uint32_t stlb_set;
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
+    extern uint32_t itlb_latency;
+    extern uint32_t dtlb_latency;
+    extern uint32_t l1i_latency;
+    extern uint32_t l1d_latency;
     extern string   max_lru_before_eviction_block_type;
 }
 
@@ -1141,6 +1145,10 @@ void print_addr_translation_stats(uint32_t cpu)
     if (ooo_cpu[cpu].page_table_walker != nullptr) {
         ooo_cpu[cpu].page_table_walker->ptw_rq_waiting_time_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_PTW_RQ_waiting_time_hist").c_str());
     }
+
+    ooo_cpu[cpu].load_load_chain_latency_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_load_load_chain_latency_hist").c_str());
+    ooo_cpu[cpu].load_store_chain_latency_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_load_store_chain_latency_hist").c_str());
+    ooo_cpu[cpu].dep_chain_latency_hist.printCsv(stdout, ("Core_" + to_string(cpu) + "_dep_chain_latency_hist").c_str());
     cout << endl;
 }
 
@@ -1193,14 +1201,14 @@ void finish_warmup()
 
     // set actual cache latency
     for (uint32_t i=0; i<NUM_CPUS; i++) {
-        ooo_cpu[i].ITLB.LATENCY = ITLB_LATENCY;
-        ooo_cpu[i].DTLB.LATENCY = DTLB_LATENCY;
+        ooo_cpu[i].ITLB.LATENCY = knob::itlb_latency;
+        ooo_cpu[i].DTLB.LATENCY = knob::dtlb_latency;
         ooo_cpu[i].STLB.LATENCY = knob::stlb_latency;
-        ooo_cpu[i].L1I.LATENCY  = L1I_LATENCY;
-        ooo_cpu[i].L1D.LATENCY  = L1D_LATENCY;
-        ooo_cpu[i].L2C.LATENCY  = L2C_LATENCY;
+        ooo_cpu[i].L1I.LATENCY  = knob::l1i_latency;
+        ooo_cpu[i].L1D.LATENCY  = knob::l1d_latency;
+        ooo_cpu[i].L2C.LATENCY  = knob::l2c_latency;
     }
-    uncore.LLC.LATENCY = LLC_LATENCY;
+    uncore.LLC.LATENCY = knob::llc_latency;
 }
 
 static void print_packet_tracker(uint32_t cpu, const PacketTrackerFilter &filter)

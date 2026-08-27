@@ -281,7 +281,7 @@ void MEMORY_CONTROLLER::schedule(PACKET_QUEUE *queue)
                 if(knob::pseudo_direct_dram_prefetch_rob_part_type == NUM_PARTITION_TYPES 
                     || (uint32_t)op_rob_part_type == knob::pseudo_direct_dram_prefetch_rob_part_type)
                 {
-                    uint64_t on_chip_cache_lookup_lat = L1D_LATENCY + L2C_LATENCY + LLC_LATENCY;
+                    uint64_t on_chip_cache_lookup_lat = L1D_LATENCY + ooo_cpu[op_cpu].L2C.LATENCY + uncore.LLC.LATENCY;
                     if(LATENCY > on_chip_cache_lookup_lat)
                     {
                         LATENCY = LATENCY - on_chip_cache_lookup_lat;

@@ -17,6 +17,13 @@ namespace knob
 	uint32_t stlb_set = STLB_SET;
 	uint32_t stlb_way = STLB_WAY;
 	uint32_t stlb_latency = STLB_LATENCY;
+	uint32_t itlb_latency = ITLB_LATENCY;
+	uint32_t dtlb_latency = DTLB_LATENCY;
+	uint32_t l1i_latency = L1I_LATENCY;
+	uint32_t l1d_latency = L1D_LATENCY;
+	// pravesh: shadowSTLB
+	uint32_t l2c_latency = L2C_LATENCY;
+	uint32_t llc_latency = LLC_LATENCY;
 	string max_lru_before_eviction_block_type = "TRANSLATION";
 	// pravesh: shadowSTLB
 	string shadowstlb_mode = "analysis";
@@ -570,6 +577,30 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
     else if (MATCH("", "stlb_latency"))
     {
 		knob::stlb_latency = atoi(value);
+    }
+    else if (MATCH("", "itlb_latency"))
+    {
+		knob::itlb_latency = atoi(value);
+    }
+    else if (MATCH("", "dtlb_latency"))
+    {
+		knob::dtlb_latency = atoi(value);
+    }
+    else if (MATCH("", "l1i_latency"))
+    {
+		knob::l1i_latency = atoi(value);
+    }
+    else if (MATCH("", "l1d_latency"))
+    {
+		knob::l1d_latency = atoi(value);
+    }
+    else if (MATCH("", "l2c_latency"))
+    {
+		knob::l2c_latency = atoi(value);
+    }
+    else if (MATCH("", "llc_latency"))
+    {
+		knob::llc_latency = atoi(value);
     }
     else if (MATCH("", "max_lru_before_eviction_block_type"))
     {

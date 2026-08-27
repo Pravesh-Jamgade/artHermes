@@ -1255,7 +1255,11 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
 
             int32_t prior_dist = ROB.entry[prior].is_load ? 0 : ROB.entry[prior].dist_from_load;
             if (ROB.entry[prior].is_load || ROB.entry[prior].dist_from_load >= 0) {
-                ROB.entry[current].dist_from_load = std::max(ROB.entry[current].dist_from_load, prior_dist + 1);
+                if (prior_dist + 1 > ROB.entry[current].dist_from_load) {
+                    ROB.entry[current].dist_from_load = prior_dist + 1;
+                    // pravesh: shadowSTLB
+                    ROB.entry[current].chain_start_cycle = ROB.entry[prior].is_load ? ROB.entry[prior].dispatch_cycle : ROB.entry[prior].chain_start_cycle;
+                }
             }
 
             if (warmup_complete[cpu] && ROB.entry[prior].is_load && ROB.entry[current].is_store) {
@@ -2709,6 +2713,11 @@ void O3_CPU::retire_rob()
                     uint32_t dist_len = ROB.entry[ROB.head].dist_from_load;
                     if (dist_len >= 128) dist_len = 127;
                     load_load_chain_hist[dist_len]++;
+
+                    // pravesh: shadowSTLB
+                    uint64_t chain_latency = current_core_cycle[cpu] - ROB.entry[ROB.head].chain_start_cycle;
+                    load_load_chain_latency_hist.update(chain_latency);
+                    dep_chain_latency_hist.update(chain_latency);
                 }
             }
             if (ROB.entry[ROB.head].is_store) {
@@ -2720,6 +2729,11 @@ void O3_CPU::retire_rob()
                     uint32_t dist_len = ROB.entry[ROB.head].dist_from_load;
                     if (dist_len >= 128) dist_len = 127;
                     load_store_chain_hist[dist_len]++;
+
+                    // pravesh: shadowSTLB
+                    uint64_t chain_latency = current_core_cycle[cpu] - ROB.entry[ROB.head].chain_start_cycle;
+                    load_store_chain_latency_hist.update(chain_latency);
+                    dep_chain_latency_hist.update(chain_latency);
                 }
             }
             if (ROB.entry[ROB.head].is_branch) num_retired_branches++;

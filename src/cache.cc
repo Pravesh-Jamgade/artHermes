@@ -81,6 +81,12 @@ namespace knob
     extern uint32_t stlb_set;
     extern uint32_t stlb_way;
     extern uint32_t stlb_latency;
+    extern uint32_t itlb_latency;
+    extern uint32_t dtlb_latency;
+    extern uint32_t l1i_latency;
+    extern uint32_t l1d_latency;
+    extern uint32_t l2c_latency;
+    extern uint32_t llc_latency;
     extern string   max_lru_before_eviction_block_type;
 }
 
@@ -94,7 +100,7 @@ void print_cache_config()
         << "itlb_wq_size " << ITLB_WQ_SIZE << endl
         << "itlb_pq_size " << ITLB_PQ_SIZE << endl
         << "itlb_mshr_size " << ITLB_MSHR_SIZE << endl
-        << "itlb_latency " << ITLB_LATENCY << endl
+        << "itlb_latency " << knob::itlb_latency << endl
         << "itlb_priority_rq " << +knob::enable_itlb_priority_rq << endl
         << "itlb_priority_rq_type " << priority_name_string[knob::itlb_priority_rq_priority_type] << endl
         << endl
@@ -104,7 +110,7 @@ void print_cache_config()
         << "dtlb_wq_size " << DTLB_WQ_SIZE << endl
         << "dtlb_pq_size " << DTLB_PQ_SIZE << endl
         << "dtlb_mshr_size " << DTLB_MSHR_SIZE << endl
-        << "dtlb_latency " << DTLB_LATENCY << endl
+        << "dtlb_latency " << knob::dtlb_latency << endl
         << "dtlb_priority_rq " << +knob::enable_dtlb_priority_rq << endl
         << "dtlb_priority_rq_type " << priority_name_string[knob::dtlb_priority_rq_priority_type] << endl
         << endl
@@ -125,7 +131,7 @@ void print_cache_config()
         << "l1i_wq_size " << L1I_WQ_SIZE << endl
         << "l1i_pq_size " << L1I_PQ_SIZE << endl
         << "l1i_mshr_size " << L1I_MSHR_SIZE << endl
-        << "l1i_latency " << L1I_LATENCY << endl
+        << "l1i_latency " << knob::l1i_latency << endl
         << "l1i_priority_rq " << +knob::enable_l1i_priority_rq << endl
         << "l1i_priority_rq_type " << priority_name_string[knob::l1i_priority_rq_priority_type] << endl
         << endl
@@ -136,7 +142,7 @@ void print_cache_config()
         << "l1d_wq_size " << L1D_WQ_SIZE << endl
         << "l1d_pq_size " << L1D_PQ_SIZE << endl
         << "l1d_mshr_size " << L1D_MSHR_SIZE << endl
-        << "l1d_latency " << L1D_LATENCY << endl
+        << "l1d_latency " << knob::l1d_latency << endl
         << "l1d_priority_rq " << +knob::enable_l1d_priority_rq << endl
         << "l1d_priority_rq_type " << priority_name_string[knob::l1d_priority_rq_priority_type] << endl
         << endl
@@ -147,7 +153,7 @@ void print_cache_config()
         << "l2c_wq_size " << L2C_WQ_SIZE << endl
         << "l2c_pq_size " << L2C_PQ_SIZE << endl
         << "l2c_mshr_size " << L2C_MSHR_SIZE << endl
-        << "l2c_latency " << L2C_LATENCY << endl
+        << "l2c_latency " << knob::l2c_latency << endl
         << "l2c_priority_rq " << +knob::enable_l2c_priority_rq << endl
         << "l2c_priority_rq_type " << priority_name_string[knob::l2c_priority_rq_priority_type] << endl
         << endl
@@ -158,7 +164,7 @@ void print_cache_config()
         << "llc_wq_size " << LLC_WQ_SIZE << endl
         << "llc_pq_size " << LLC_PQ_SIZE << endl
         << "llc_mshr_size " << LLC_MSHR_SIZE << endl
-        << "llc_latency " << LLC_LATENCY << endl
+        << "llc_latency " << knob::llc_latency << endl
         << "llc_priority_rq " << +knob::enable_llc_priority_rq << endl
         << "llc_priority_rq_type " << priority_name_string[knob::llc_priority_rq_priority_type] << endl
         << endl;
