@@ -138,6 +138,7 @@ void print_knobs()
         << "low_bandwidth " << knob::low_bandwidth << endl
         // << "scramble_loads " << knob_scramble_loads << endl
         << "cloudsuite " << knob::cloudsuite << endl
+        << "translation_extra_latency " << knob::translation_extra_latency << endl
         << "measure_ipc " << knob::measure_ipc << endl
         << "measure_ipc_epoch " << knob::measure_ipc_epoch << endl
         << "measure_dram_bw " << knob::measure_dram_bw << endl

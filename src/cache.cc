@@ -88,6 +88,7 @@ namespace knob
     extern uint32_t l2c_latency;
     extern uint32_t llc_latency;
     extern string   max_lru_before_eviction_block_type;
+    extern uint32_t translation_extra_latency;
 }
 
 uint64_t l2pf_access = 0;
@@ -1016,6 +1017,9 @@ void CACHE::handle_read()
         if (RQ->peek().started_latency == 0) {
             PACKET& head_entry = RQ->peek();
             head_entry.event_cycle = current_cycle + LATENCY;
+            if (head_entry.type == TRANSLATION) {
+                head_entry.event_cycle += knob::translation_extra_latency;
+            }
             head_entry.started_latency = 1;
         }
 

@@ -469,6 +469,7 @@ namespace knob
 	bool enable_shmem_buffered = false;
 
 	int num_threads_per_core = 1;
+	uint32_t translation_extra_latency = 0;
 }
 
 std::vector<std::pair<std::string, std::string>> tracked_explicit_settings;
@@ -2121,6 +2122,10 @@ int parse_knobs(void* user, const char* section, const char* name, const char* v
 	else if(MATCH("", "num_threads_per_core"))
 	{
 		knob::num_threads_per_core = atoi(value);
+	}
+	else if (MATCH("", "translation_extra_latency"))
+	{
+		knob::translation_extra_latency = atoi(value);
 	}
 
     else
