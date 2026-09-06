@@ -437,7 +437,7 @@ public:
          complete_execution(uint32_t rob_index),
          reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index),
          reg_RAW_release(uint32_t rob_index),
-         mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_index, uint32_t lq_index),
+         lsq_dependency_release(uint32_t rob_index),
          handle_o3_fetch(PACKET *current_packet, uint32_t cache_type),
          handle_merged_translation(PACKET *provider),
          handle_merged_load(PACKET *provider),

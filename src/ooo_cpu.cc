@@ -1204,6 +1204,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         {
             for (int i=prior; i>=(int)ROB.head; i--) if (ROB.entry[i].executed != COMPLETED) 
             {
+		        check_dependency(i, rob_index);
 		        for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) 
                 {
 			        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
@@ -1215,6 +1216,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
         {
             for (int i=prior; i>=0; i--) if (ROB.entry[i].executed != COMPLETED) 
             {
+		        check_dependency(i, rob_index);
 		        for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) 
                 {
 			        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
@@ -1223,6 +1225,7 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
 	        }
             for (int i=ROB.SIZE-1; i>=(int)ROB.head; i--) if (ROB.entry[i].executed != COMPLETED) 
             {
+		        check_dependency(i, rob_index);
 		        for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) 
                 {
 			        if (ROB.entry[rob_index].source_registers[j] && (ROB.entry[rob_index].reg_RAW_checked[j] == 0))
@@ -1233,8 +1236,60 @@ void O3_CPU::reg_dependency(uint32_t rob_index)
     }
 }
 
+void O3_CPU::check_dependency(int prior, int current)
+{
+    // Only loads and stores need an admission dependency: other consumers do
+    // not occupy an LSQ.  Thread IDs are part of the architectural context, so
+    // identical register numbers or virtual addresses in two SMT threads do
+    // not alias.
+    if (!ROB.entry[current].is_memory ||
+        ROB.entry[prior].asid[1] != ROB.entry[current].asid[1])
+        return;
+
+    bool register_raw = false;
+    bool register_war = false;
+    bool memory_raw = false;
+    bool memory_war = false;
+
+    for (uint32_t destination = 0; destination < MAX_INSTR_DESTINATIONS; ++destination) {
+        const uint32_t prior_destination = ROB.entry[prior].destination_registers[destination];
+        const uint32_t current_destination = ROB.entry[current].destination_registers[destination];
+
+        for (uint32_t source = 0; source < NUM_INSTR_SOURCES; ++source) {
+            register_raw |= prior_destination &&
+                            prior_destination == ROB.entry[current].source_registers[source];
+            register_war |= current_destination &&
+                            current_destination == ROB.entry[prior].source_registers[source];
+        }
+    }
+
+    // The trace supplies effective addresses before LSQ allocation, allowing
+    // memory ordering to be established entirely in the ROB.
+    for (uint32_t destination = 0; destination < MAX_INSTR_DESTINATIONS; ++destination) {
+        for (uint32_t source = 0; source < NUM_INSTR_SOURCES; ++source) {
+            memory_raw |= ROB.entry[prior].destination_memory[destination] &&
+                          ROB.entry[prior].destination_memory[destination] ==
+                              ROB.entry[current].source_memory[source];
+            memory_war |= ROB.entry[current].destination_memory[destination] &&
+                          ROB.entry[current].destination_memory[destination] ==
+                              ROB.entry[prior].source_memory[source];
+        }
+    }
+
+    if ((register_raw || register_war || memory_raw || memory_war) &&
+        !ROB.entry[prior].lsq_instrs_depend_on_me.search(current)) {
+        ROB.entry[prior].lsq_instrs_depend_on_me.insert(current);
+        ROB.entry[current].num_lsq_dependencies++;
+
+        if (warmup_complete[cpu] && memory_raw && ROB.entry[prior].is_store && ROB.entry[current].is_load)
+            count_dep_mem_store_load++;
+    }
+}
+
 void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index)
 {
+    if (ROB.entry[prior].asid[1] != ROB.entry[current].asid[1])
+        return;
     for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++) 
     {
         if (ROB.entry[prior].destination_registers[i] == 0)
@@ -1385,7 +1440,8 @@ void O3_CPU::schedule_memory_instruction()
                 break;
             }
 
-            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
+            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready &&
+                ROB.entry[i].num_lsq_dependencies == 0 && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
         }
     }
@@ -1404,7 +1460,8 @@ void O3_CPU::schedule_memory_instruction()
                 break;
             }
 
-            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
+            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready &&
+                ROB.entry[i].num_lsq_dependencies == 0 && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
         }
         for (uint32_t i=0; i<limit; i++) 
@@ -1420,7 +1477,8 @@ void O3_CPU::schedule_memory_instruction()
                 break;
             }
 
-            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready && (ROB.entry[i].scheduled == INFLIGHT))
+            if (ROB.entry[i].is_memory && ROB.entry[i].reg_ready &&
+                ROB.entry[i].num_lsq_dependencies == 0 && (ROB.entry[i].scheduled == INFLIGHT))
                 do_memory_scheduling(i);
         }
     }
@@ -1566,129 +1624,14 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
         LQ.entry[lq_index].went_offchip_pred = 0;
     LQ.occupancy++;
 
-    // check RAW dependency
-    int prior = rob_index - 1;
-    if (prior < 0)
-        prior = ROB.SIZE - 1;
-
-    if (rob_index != ROB.head) 
-    {
-        if ((int)ROB.head <= prior) 
-        {
-            for (int i=prior; i>=(int)ROB.head; i--) 
-            {
-                if (LQ.entry[lq_index].producer_id != UINT64_MAX)
-                {
-                    break;
-                }
-                mem_RAW_dependency(i, rob_index, data_index, lq_index);
-            }
-        }
-        else 
-        {
-            for (int i=prior; i>=0; i--) 
-            {
-                if (LQ.entry[lq_index].producer_id != UINT64_MAX)
-                {
-                    break;
-                }
-                mem_RAW_dependency(i, rob_index, data_index, lq_index);
-            }
-            for (int i=ROB.SIZE-1; i>=(int)ROB.head; i--) 
-            { 
-                if (LQ.entry[lq_index].producer_id != UINT64_MAX)
-                {
-                    break;
-                }
-                mem_RAW_dependency(i, rob_index, data_index, lq_index);
-            }
-        }
-    }
-
-    // check
-    // 1) if store-to-load forwarding is possible
-    // 2) if there is WAR that are not correctly executed
-    uint32_t forwarding_index = SQ.SIZE;
-    for (uint32_t i=0; i<SQ.SIZE; i++) {
-
-        // skip empty slot
-        if (SQ.entry[i].virtual_address == 0)
-            continue;
-
-        // forwarding should be done by the SQ entry that holds the same producer_id from RAW dependency check
-        if (SQ.entry[i].virtual_address == LQ.entry[lq_index].virtual_address && SQ.entry[i].asid[1] == LQ.entry[lq_index].asid[1]) { // store-to-load forwarding check
-
-            // forwarding store is in the SQ
-            if ((rob_index != ROB.head) && (LQ.entry[lq_index].producer_id == SQ.entry[i].instr_id)) { // RAW
-                forwarding_index = i;
-                break; // should be break
-            }
-
-            if ((LQ.entry[lq_index].producer_id == UINT64_MAX) && (LQ.entry[lq_index].instr_id <= SQ.entry[i].instr_id) && (LQ.entry[lq_index].asid[1] == SQ.entry[i].asid[1])) { // WAR 
-                // a load is about to be added in the load queue and we found a store that is 
-                // "logically later in the program order but already executed" => this is not correctly executed WAR
-                // due to out-of-order execution, this case is possible, for example
-                // 1) application is load intensive and load queue is full
-                // 2) we have loads that can't be added in the load queue
-                // 3) subsequent stores logically behind in the program order are added in the store queue first
-
-                // thanks to the store buffer, data is not written back to the memory system until retirement
-                // also due to in-order retirement, this "already executed store" cannot be retired until we finish the prior load instruction 
-                // if we detect WAR when a load is added in the load queue, just let the load instruction to access the memory system
-                // no need to mark any dependency because this is actually WAR not RAW
-
-                // do not forward data from the store queue since this is WAR
-                // just read correct data from data cache
-
-                LQ.entry[lq_index].physical_address = 0;
-                LQ.entry[lq_index].translated = 0;
-                LQ.entry[lq_index].fetched = 0;
-                
-                DP(if(warmup_complete[cpu]) {
-                cout << "[LQ] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " reset fetched: " << +LQ.entry[lq_index].fetched;
-                cout << " to obey WAR store instr_id: " << SQ.entry[i].instr_id << " cycle: " << current_core_cycle[cpu] << endl; });
-            }
-        }
-    }
-
-    if (forwarding_index != SQ.SIZE)  // we have a store-to-load forwarding
-    {
-        if ((SQ.entry[forwarding_index].fetched == COMPLETED) && (SQ.entry[forwarding_index].event_cycle <= current_core_cycle[cpu]))
-        {
-            LQ.entry[lq_index].physical_address = (SQ.entry[forwarding_index].physical_address & ~(uint64_t) ((1 << LOG2_BLOCK_SIZE) - 1)) | (LQ.entry[lq_index].virtual_address & ((1 << LOG2_BLOCK_SIZE) - 1));
-            LQ.entry[lq_index].translated = COMPLETED;
-            LQ.entry[lq_index].fetched = COMPLETED;
-
-            uint32_t fwr_rob_index = LQ.entry[lq_index].rob_index;
-            ROB.entry[fwr_rob_index].num_mem_ops--;
-            ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
-            ROB.entry[fwr_rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
-            ROB.entry[fwr_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
-            if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
-                cerr << "[ROB_ERROR] num_mem_ops underflow in load forwarding: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
-                cerr << " instr_id: " << ROB.entry[fwr_rob_index].instr_id << " rob_index=" << fwr_rob_index << endl;
-                assert(0 && "Load forwarding caused num_mem_ops underflow");
-            }
-            if (ROB.entry[fwr_rob_index].num_mem_ops == 0)
-                inflight_mem_executions++;
-
-            DP(if(warmup_complete[cpu]) {
-            cout << "[LQ] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << hex;
-            cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " is forwarded by store instr_id: ";
-            cout << SQ.entry[forwarding_index].instr_id << " remain_num_ops: " << ROB.entry[fwr_rob_index].num_mem_ops << " cycle: " << current_core_cycle[cpu] << endl; });
-
-            release_load_queue(lq_index);
-        }
-        else
-            ; // store is not executed yet, forwarding will be handled by execute_store()
-            // loads, that are eventually be forwarded from SQ but the stores are not completed yet, are still in LQ
-            // which means they can still generate memory request to cache hierarchy
-    }
+    // RAW/WAR hazards were recorded before LSQ admission in the ROB.  An
+    // admitted load is therefore independent and must start at RTL0; it never
+    // inherits a producer's translation or data result.
 
     // succesfully added to the load queue
     ROB.entry[rob_index].source_added[data_index] = 1;
 
-    if (LQ.entry[lq_index].virtual_address && (LQ.entry[lq_index].producer_id == UINT64_MAX)) { // not released and no forwarding
+    if (LQ.entry[lq_index].virtual_address) {
         RTL0[RTL0_tail] = lq_index;
         RTL0_tail++;
         if (RTL0_tail == LQ_SIZE)
@@ -1703,38 +1646,6 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
     cout << "[LQ] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id;
     cout << " is added in the LQ address: " << hex << LQ.entry[lq_index].virtual_address << dec << " translated: " << +LQ.entry[lq_index].translated;
     cout << " fetched: " << +LQ.entry[lq_index].fetched << " index: " << lq_index << " occupancy: " << LQ.occupancy << " cycle: " << current_core_cycle[cpu] << endl; });
-}
-
-void O3_CPU::mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_index, uint32_t lq_index)
-{
-    for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++) {
-        if (ROB.entry[prior].destination_memory[i] == 0)
-            continue;
-
-        if (ROB.entry[prior].destination_memory[i] == ROB.entry[current].source_memory[data_index] && ROB.entry[prior].asid[1] == ROB.entry[current].asid[1]) { //  store-to-load forwarding check
-
-            // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
-            ROB.entry[prior].memory_instrs_depend_on_me.insert (current);   // this load cannot be executed until the prior store gets executed
-            ROB.entry[prior].is_producer = 1;
-            LQ.entry[lq_index].producer_id = ROB.entry[prior].instr_id; 
-            LQ.entry[lq_index].translated = INFLIGHT;
-
-            if (warmup_complete[cpu] && ROB.entry[prior].is_store && ROB.entry[current].is_load) {
-                count_dep_mem_store_load++;
-            }
-
-            int32_t prior_dist = ROB.entry[prior].is_load ? 0 : ROB.entry[prior].dist_from_load;
-            if (ROB.entry[prior].is_load || ROB.entry[prior].dist_from_load >= 0) {
-                ROB.entry[current].dist_from_load = std::max(ROB.entry[current].dist_from_load, prior_dist + 1);
-            }
-
-            DP (if(warmup_complete[cpu]) {
-            cout << "[LQ] " << __func__ << " RAW producer instr_id: " << ROB.entry[prior].instr_id << " consumer_id: " << ROB.entry[current].instr_id << " lq_index: " << lq_index;
-            cout << hex << " address: " << ROB.entry[prior].destination_memory[i] << dec << endl; });
-
-            return;
-        }
-    }
 }
 
 void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
@@ -2032,65 +1943,10 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
     cout << " full_address: " << SQ.entry[sq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
     cout << " event_cycle: " << SQ.entry[sq_index].event_cycle << endl; });
 
-    // resolve RAW dependency after DTLB access
-    // check if this store has dependent loads
-    if (ROB.entry[rob_index].is_producer) {
-	ITERATE_SET(dependent,ROB.entry[rob_index].memory_instrs_depend_on_me, ROB_SIZE) {
-            // check if dependent loads are already added in the load queue
-            for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) { // which one is dependent?
-                if (ROB.entry[dependent].source_memory[j] && ROB.entry[dependent].source_added[j]) {
-                    if (ROB.entry[dependent].source_memory[j] == SQ.entry[sq_index].virtual_address && ROB.entry[dependent].asid[1] == SQ.entry[sq_index].asid[1]) { // this is required since a single instruction can issue multiple loads
+    // Dependents are intentionally not completed or forwarded here.  They are
+    // released from the ROB when this instruction completes, and will then
+    // allocate their own LSQ entry and traverse RTS0/RTL0 normally.
 
-                        // now we can resolve RAW dependency
-                        uint32_t lq_index = ROB.entry[dependent].lq_index[j];
-#ifdef SANITY_CHECK
-                        if (lq_index >= LQ.SIZE) {
-                            cerr << "[LQ_ERROR] lq_index out of bounds: lq_index=" << lq_index << " LQ.SIZE=" << LQ.SIZE;
-                            cerr << " dependent=" << dependent << " instr_id=" << ROB.entry[dependent].instr_id << endl;
-                            assert(0 && "Load queue index exceeds bounds in RAW dependency");
-                        }
-                        if (LQ.entry[lq_index].producer_id != SQ.entry[sq_index].instr_id) {
-                            cerr << "[SQ2] " << __func__ << " lq_index: " << lq_index << " producer_id: " << LQ.entry[lq_index].producer_id;
-                            cerr << " does not match to the store instr_id: " << SQ.entry[sq_index].instr_id << endl;
-                            assert(0 && "Load producer ID does not match store instruction ID");
-                        }
-#endif
-                        // update correspodning LQ entry
-                        LQ.entry[lq_index].physical_address = (SQ.entry[sq_index].physical_address & ~(uint64_t) ((1 << LOG2_BLOCK_SIZE) - 1)) | (LQ.entry[lq_index].virtual_address & ((1 << LOG2_BLOCK_SIZE) - 1));
-                        LQ.entry[lq_index].translated = COMPLETED;
-                        LQ.entry[lq_index].fetched = COMPLETED;
-                        LQ.entry[lq_index].event_cycle = current_core_cycle[cpu];
-
-                        uint32_t fwr_rob_index = LQ.entry[lq_index].rob_index;
-                        ROB.entry[fwr_rob_index].num_mem_ops--;
-                        ROB.entry[fwr_rob_index].event_cycle = current_core_cycle[cpu];
-                        ROB.entry[fwr_rob_index].translation_finished_event_cycle = current_core_cycle[cpu];
-                        ROB.entry[fwr_rob_index].data_fetch_finished_event_cycle = current_core_cycle[cpu];
-#ifdef SANITY_CHECK
-                        if (ROB.entry[fwr_rob_index].num_mem_ops < 0) {
-                            cerr << "[ROB_ERROR] num_mem_ops underflow in RAW resolution: num_mem_ops=" << ROB.entry[fwr_rob_index].num_mem_ops;
-                            cerr << " instr_id: " << ROB.entry[fwr_rob_index].instr_id << " rob_index=" << fwr_rob_index << endl;
-                            assert(0 && "RAW dependency resolution caused num_mem_ops underflow");
-                        }
-#endif
-                        if (ROB.entry[fwr_rob_index].num_mem_ops == 0)
-                            inflight_mem_executions++;
-
-                        DP(if(warmup_complete[cpu]) {
-                        cout << "[LQ3] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << hex;
-                        cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " is forwarded by store instr_id: ";
-                        cout << SQ.entry[sq_index].instr_id << " remain_num_ops: " << ROB.entry[fwr_rob_index].num_mem_ops << " cycle: " << current_core_cycle[cpu] << endl; });
-
-                        release_load_queue(lq_index);
-
-                        // clear dependency bit
-                        if (j == (NUM_INSTR_SOURCES-1))
-                            ROB.entry[rob_index].memory_instrs_depend_on_me.insert (dependent);
-                    }
-                }
-            }
-        }
-    }
 }
 
 int O3_CPU::execute_load(uint32_t rob_index, uint32_t lq_index, uint32_t data_index)
@@ -2153,6 +2009,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
             {
                 reg_RAW_release(rob_index);
             }
+            lsq_dependency_release(rob_index);
 
             if (ROB.entry[rob_index].branch_mispredicted)
 	        {
@@ -2179,6 +2036,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 {
                     reg_RAW_release(rob_index);
                 }
+                lsq_dependency_release(rob_index);
 
                 if (ROB.entry[rob_index].branch_mispredicted)
 		        {
@@ -2191,6 +2049,20 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 cout << " fetch_stall: " << +fetch_stall[rob_tid] << " event: " << ROB.entry[rob_index].event_cycle << " current: " << current_core_cycle[cpu] << endl; });
             }
         }
+    }
+}
+
+void O3_CPU::lsq_dependency_release(uint32_t rob_index)
+{
+    ITERATE_SET(dependent, ROB.entry[rob_index].lsq_instrs_depend_on_me, ROB_SIZE) {
+#ifdef SANITY_CHECK
+        if (ROB.entry[dependent].num_lsq_dependencies <= 0) {
+            cerr << "[ROB_ERROR] LSQ dependency underflow: producer=" << rob_index
+                 << " consumer=" << dependent << endl;
+            assert(0 && "LSQ dependency counter underflow");
+        }
+#endif
+        ROB.entry[dependent].num_lsq_dependencies--;
     }
 }
 

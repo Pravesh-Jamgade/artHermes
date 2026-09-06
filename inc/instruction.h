@@ -164,7 +164,8 @@ class ooo_model_instr {
     uint64_t chain_start_cycle;
 
     uint32_t fetched, scheduled;
-    int num_reg_ops, num_mem_ops, num_mem_src, num_mem_dest, num_reg_dependent;
+    int num_reg_ops, num_mem_ops, num_mem_src, num_mem_dest, num_reg_dependent,
+        num_lsq_dependencies;
 
     // executed bit is set after all dependencies are eliminated and this instr is chosen on a cycle, according to EXEC_WIDTH
     int executed;
@@ -196,6 +197,11 @@ class ooo_model_instr {
     // these are indices of instructions in the ROB that depend on me
     //uint8_t memory_instrs_depend_on_me[ROB_SIZE];
     fastset memory_instrs_depend_on_me;
+
+    // Memory operations remain in the ROB until every older RAW/WAR hazard has
+    // completed.  Keeping this relation here (rather than in an LSQ entry) is
+    // essential: a blocked consumer deliberately has no LQ/SQ entry yet.
+    fastset lsq_instrs_depend_on_me;
 
     uint32_t lq_index[NUM_INSTR_SOURCES],
              sq_index[NUM_INSTR_DESTINATIONS_SPARC],
@@ -282,6 +288,7 @@ class ooo_model_instr {
         num_mem_src = 0;
         num_mem_dest = 0;
         num_reg_dependent = 0;
+        num_lsq_dependencies = 0;
 
         for (uint32_t i=0; i<NUM_INSTR_SOURCES; i++) {
             source_registers[i] = 0;
