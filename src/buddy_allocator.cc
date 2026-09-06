@@ -1,5 +1,7 @@
 #include "buddy_allocator.h"
 #include "logging.h"
+#include "ooo_cpu.h"
+#include "uncore.h"
 #include <cmath>
 
 // Global instance
@@ -101,6 +103,35 @@ void BuddyAllocator::shadow_clear_evicted_page(uint64_t pa)
     }
 }
 
+// Remove every cached copy of a page before its physical frame is reused.
+// Translation caches are virtually tagged, while the data caches are tagged
+// with physical cache-line addresses, so both sides of the mapping are needed.
+void BuddyAllocator::invalidate_evicted_page(uint64_t pframe_num, uint64_t vpage_num)
+{
+    for (uint32_t cpu = 0; cpu < NUM_CPUS; cpu++) {
+        if (vpage_num != UINT64_MAX) {
+            ooo_cpu[cpu].ITLB.invalidate_entry(vpage_num);
+            ooo_cpu[cpu].DTLB.invalidate_entry(vpage_num);
+            ooo_cpu[cpu].STLB.invalidate_entry(vpage_num);
+            ooo_cpu[cpu].shadowSTLB.invalidate_entry(vpage_num >> 2);
+        }
+
+        const uint64_t first_cache_line = pframe_num << (LOG2_PAGE_SIZE - LOG2_BLOCK_SIZE);
+        const uint64_t cache_lines_per_page = PAGE_SIZE / BLOCK_SIZE;
+        for (uint64_t offset = 0; offset < cache_lines_per_page; offset++) {
+            const uint64_t cache_line = first_cache_line + offset;
+            ooo_cpu[cpu].L1I.invalidate_entry(cache_line);
+            ooo_cpu[cpu].L1D.invalidate_entry(cache_line);
+            ooo_cpu[cpu].L2C.invalidate_entry(cache_line);
+        }
+    }
+
+    const uint64_t first_cache_line = pframe_num << (LOG2_PAGE_SIZE - LOG2_BLOCK_SIZE);
+    const uint64_t cache_lines_per_page = PAGE_SIZE / BLOCK_SIZE;
+    for (uint64_t offset = 0; offset < cache_lines_per_page; offset++)
+        uncore.LLC.invalidate_entry(first_cache_line + offset);
+}
+
 // Allocate any free physical page from the buddy free lists.
 // Evicts the oldest allocated frame (FIFO) when at capacity.
 // Returns the physical byte address of the newly allocated frame, 0 on OOM.
@@ -118,10 +149,13 @@ uint64_t BuddyAllocator::access()
         allocated.erase(evict);
         // Remove any vpage→pframe mapping for the evicted frame.
         auto rit = pframe_to_vpage.find(evict);
+        uint64_t evicted_vpage = UINT64_MAX;
         if (rit != pframe_to_vpage.end()) {
+            evicted_vpage = rit->second;
             vpage_to_pframe.erase(rit->second);
             pframe_to_vpage.erase(rit);
         }
+        invalidate_evicted_page(evict, evicted_vpage);
 
         free_page(evict);
     }
