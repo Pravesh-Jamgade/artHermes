@@ -118,6 +118,7 @@ struct BuddyAllocator {
 private:
     uint64_t alloc_any(); // allocate any available order-0 page from the buddy free lists
     void free_page(uint64_t page_num);
+    void invalidate_evicted_page(uint64_t pframe_num, uint64_t vpage_num);
 
     // Decompose a PTE byte address into its shadow indices.
     static void pte_addr_decompose(uint64_t pte_paddr,
